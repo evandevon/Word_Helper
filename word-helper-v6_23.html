@@ -1,0 +1,1891 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="X-Frame-Options" content="ALLOWALL">
+<title>Word Helper</title>
+<style>
+@font-face {
+  font-family: 'OpenDyslexic';
+  src: url('https://cdn.jsdelivr.net/npm/opendyslexic@0.91.12/fonts/OpenDyslexic-Regular.otf') format('opentype');
+  font-weight: normal; font-style: normal;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}body{font-family:Arial,sans-serif;background:#f5f7fa;color:#1a1a1a}
+#app{max-width:720px;margin:0 auto;padding:1rem;display:flex;flex-direction:column;min-height:100dvh}
+h1{font-size:22px;font-weight:600;margin-bottom:4px}
+.sub{font-size:14px;color:#666;margin-bottom:1rem}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem}
+.row label{font-size:13px;color:#555;white-space:nowrap}
+input[type=text]{font-size:14px;padding:6px 10px;border-radius:8px;border:1px solid #ccc;background:#fff;color:#1a1a1a;outline:none}
+input[type=text]:focus{border-color:#1D9E75;box-shadow:0 0 0 2px rgba(93,202,165,0.25)}
+/* Top controls row */
+#top-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:0.6rem}
+#mode-select{font-size:13px;padding:6px 10px;border-radius:8px;border:1px solid #ccc;background:#fff;color:#1a1a1a;cursor:pointer;outline:none}
+#mode-select:focus{border-color:#1D9E75}
+#voice-toggle{padding:6px 12px;font-size:13px;font-weight:500;border-radius:8px;border:1px solid #85B7EB;background:#eef5fd;color:#185FA5;cursor:pointer;white-space:nowrap;transition:background 0.12s}
+#voice-toggle:hover{background:#dce9f8}
+#editor-wrap{position:relative;margin-bottom:0.75rem;flex:1;min-height:0;display:flex;flex-direction:column}
+#editor{width:100%;flex:1;min-height:180px;font-size:22px;line-height:1.75;padding:14px 16px;border:1px solid #ccc;border-radius:12px;background:#fff;color:#1a1a1a;outline:none;white-space:pre-wrap;word-break:break-word;cursor:text;transition:background 0.2s,color 0.2s,letter-spacing 0.2s,line-height 0.2s}
+#editor:focus{border-color:#1D9E75;box-shadow:0 0 0 2px rgba(93,202,165,0.25)}
+#editor:empty:before{content:attr(data-placeholder);color:#bbb;pointer-events:none}
+#dropdown{display:none;position:fixed;z-index:9999;background:#fff;border:1px solid #d0d0d0;border-radius:12px;padding:5px;min-width:180px;max-width:320px;box-shadow:0 6px 20px rgba(0,0,0,0.12)}
+.drop-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;cursor:pointer;font-size:18px;color:#1a1a1a;transition:background 0.08s;user-select:none}
+.drop-item:hover,.drop-item.active{background:#f0faf6}
+.drop-item.active{outline:2px solid #1D9E75;outline-offset:-2px}
+.typed-part{color:#0F6E56;font-weight:600}
+.remain-part{color:#999}
+.speak-dot{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;flex-shrink:0;background:#E1F5EE;color:#0F6E56;font-size:15px;border:1px solid #9FE1CB;cursor:pointer;transition:background 0.1s}
+.speak-dot:hover{background:#9FE1CB}
+.def-dot{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;flex-shrink:0;margin-left:auto;background:#EEF5FD;color:#185FA5;font-size:13px;font-weight:700;border:1px solid #85B7EB;cursor:pointer;transition:background 0.1s}
+.def-dot:hover{background:#dce9f8}
+.drop-unknown{padding:10px 14px;font-size:14px;color:#888;font-style:italic}
+.drop-header{padding:4px 10px 2px;font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:0.05em}
+#controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:0.9rem}
+.btn{display:inline-flex;align-items:center;gap:5px;padding:8px 14px;font-size:13px;font-weight:500;border-radius:8px;border:1px solid #ddd;background:#fff;color:#1a1a1a;cursor:pointer;transition:background 0.1s;white-space:nowrap}
+.btn:hover{background:#f0f0f0}
+.btn-green{color:#0F6E56;border-color:#5DCAA5;background:#f0faf6}.btn-green:hover{background:#ddf2ea}
+.btn-blue{color:#185FA5;border-color:#85B7EB;background:#eef5fd}.btn-blue:hover{background:#dce9f8}
+.btn-purple{color:#3C3489;border-color:#AFA9EC;background:#f0effd}.btn-purple:hover{background:#e2e0f9}
+.btn-red{color:#993C1D;border-color:#F0997B;background:#fdf3f0}.btn-red:hover{background:#fbe6df}
+
+/* Spellcheck toggle */
+#spell-row{display:flex;align-items:center;gap:8px;margin-bottom:0.75rem;font-size:13px;color:#555}
+#spell-row input{width:16px;height:16px;cursor:pointer;accent-color:#1D9E75}
+/* Stats panel */
+#stats-panel{background:#fff;border:1px solid #e0e0e0;border-radius:12px;margin-bottom:0.5rem;overflow:hidden}
+#stats-toggle{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:pointer;user-select:none;font-size:13px;font-weight:600;color:#555;letter-spacing:0.03em;text-transform:uppercase}
+#stats-toggle:hover{background:#fafafa}
+#stats-arrow{font-size:12px;transition:transform 0.2s;display:inline-block}
+#stats-arrow.open{transform:rotate(180deg)}
+#stats-body{display:none;padding:0 1rem 1rem}
+#stats-body.open{display:block}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(108px,1fr));gap:8px;margin-bottom:0.75rem;padding-top:0.75rem}
+.stat-card{background:#f5f7fa;border-radius:8px;padding:10px 12px}
+.stat-label{font-size:11px;color:#777;margin-bottom:2px}
+.stat-val{font-size:20px;font-weight:600;color:#1a1a1a;line-height:1.2}
+.stat-unit{font-size:11px;color:#888;margin-left:2px;font-weight:400}
+#log-outer{border-radius:8px;border:1px solid #ebebeb;overflow:hidden}
+#log-head{width:100%;font-size:12px;border-collapse:collapse;table-layout:fixed}
+#log-head th{background:#f5f7fa;color:#666;font-weight:600;padding:6px 10px;text-align:left}
+#log-scroll{max-height:155px;overflow-y:auto}
+#log-body-tbl{width:100%;font-size:12px;border-collapse:collapse;table-layout:fixed}
+#log-body-tbl td{padding:5px 10px;border-top:1px solid #f0f0f0;color:#1a1a1a}
+.tag-s{color:#0F6E56;font-weight:600}
+.tag-t{color:#888}
+.tag-c{color:#185FA5;font-weight:600}
+#toast{display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a1a1a;color:#fff;font-size:13px;padding:10px 20px;border-radius:24px;z-index:9999;white-space:nowrap}
+#hint{font-size:12px;color:#bbb;margin-top:6px}
+#debug-wrap{margin-top:10px;border-radius:8px;overflow:hidden;border:1px solid #ddd}
+#debug-toggle{display:flex;align-items:center;justify-content:space-between;padding:7px 12px;background:#f5f5f5;cursor:pointer;user-select:none;font-size:12px;color:#888}
+#debug-toggle:hover{background:#ececec}
+#debug-body{display:none;background:#1a1a1a;padding:8px}
+#debug-body.open{display:block}
+#debug-log{font-family:monospace;font-size:11px;color:#00cc66;max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+#debug-log:empty::before{content:"No events yet — type some words to see verification results.";color:#555}
+#debug-copy{margin-top:6px;padding:5px 10px;font-size:11px;border-radius:6px;border:1px solid #444;background:#2a2a2a;color:#aaa;cursor:pointer}
+#debug-copy:hover{background:#333;color:#fff}
+.misspelled{text-decoration:underline wavy #e74c3c;text-decoration-skip-ink:none;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>&#9999;&#65039; Word Helper</h1>
+  <p class="sub">Start typing — suggestions pop up right at the cursor. Click a word to use it, or &#128266; to hear it first.</p>
+
+  <div id="top-row">
+    <select id="mode-select" onchange="setMode(this.value)" aria-label="Display mode">
+      <option value="dyslexia">🟡 Dyslexia-friendly</option>
+      <option value="regular">Regular</option>
+      <option value="highcontrast">⬛ High contrast</option>
+      <option value="darkblue">🔴 Dark blue</option>
+      <option value="large">🔠 Large text</option>
+    </select>
+    <label for="sname" id="name-label" style="font-weight:600;color:#993C1D;font-size:13px;white-space:nowrap">&#9733; Name:</label>
+    <input id="sname" type="text" placeholder="Type your name first…"
+           style="flex:1;min-width:80px;max-width:160px;border-color:#F0997B;background:#fdf3f0;font-weight:500"
+           oninput="onNameInput()" onblur="onNameBlur()" autocomplete="off">
+    <button id="voice-toggle" onclick="toggleVoice()">🔊 Female</button>
+    <label style="display:flex;align-items:center;gap:5px;font-size:13px;color:#555;cursor:pointer;white-space:nowrap">
+      <input type="checkbox" id="assist-toggle" checked onchange="toggleAssist()" style="width:15px;height:15px;accent-color:#1D9E75;cursor:pointer">
+      Suggestions &amp; spell check
+    </label>
+  </div>
+  <div id="name-msg" style="font-size:13px;color:#993C1D;margin-bottom:0.4rem;display:block">
+    &#8679; Please type your name before you start writing.
+  </div>
+
+  <div id="editor-wrap">
+    <div id="editor" contenteditable="false" spellcheck="false"
+         data-placeholder="Type your name above first&hellip;"
+         role="textbox" aria-label="Typing area" aria-multiline="true"
+         style="opacity:0.45;cursor:not-allowed;background:#f5f7fa"></div>
+  </div>
+
+  <div id="controls">
+    <button class="btn btn-green" onclick="speakAll()">&#128266; Read aloud</button>
+    <button class="btn btn-purple" onclick="copyText()">&#128203; Copy text</button>
+    <button class="btn btn-purple" onclick="copyTextAndReport()">&#128203; Copy text + report</button>
+    <button class="btn btn-blue" onclick="downloadCSV()">&#8595; Download report</button>
+    <button class="btn btn-red" onclick="clearAll()">&#128465; New session</button>
+  </div>
+
+  <div id="stats-panel">
+    <div id="stats-toggle" onclick="toggleStats()" role="button" aria-expanded="false">
+      <span>&#128202; Session stats</span>
+      <span id="stats-arrow">&#9660;</span>
+    </div>
+    <div id="stats-body">
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-label">Total time</div><div class="stat-val" id="s-ttime">&mdash;</div></div>
+        <div class="stat-card"><div class="stat-label">Time writing</div><div class="stat-val" id="s-wtime">&mdash;</div></div>
+        <div class="stat-card"><div class="stat-label">Writing %</div><div class="stat-val" id="s-wpct">&mdash;</div></div>
+        <div class="stat-card"><div class="stat-label">Words written</div><div class="stat-val" id="s-words">0</div></div>
+        <div class="stat-card"><div class="stat-label">From suggestions</div><div class="stat-val" id="s-sugg">0</div></div>
+        <div class="stat-card"><div class="stat-label">From spell corrections</div><div class="stat-val" id="s-spell">0</div></div>
+        <div class="stat-card"><div class="stat-label">Typed manually</div><div class="stat-val" id="s-typed">0</div></div>
+        <div class="stat-card"><div class="stat-label">Assistance rate</div><div class="stat-val" id="s-rate">&mdash;</div></div>
+      </div>
+      <!-- ── Visual timeline ── -->
+      <div id="graph-section" style="margin-bottom:0.75rem">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div style="font-size:11px;font-weight:600;color:#777;text-transform:uppercase;letter-spacing:0.04em">Session timeline</div>
+          <button class="btn btn-blue" onclick="downloadGraph()" style="padding:5px 10px;font-size:12px">&#8595; Download graph</button>
+        </div>
+        <canvas id="session-canvas" style="width:100%;border-radius:8px;display:block"></canvas>
+        <!-- Key insight stats row -->
+        <div id="insight-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px">
+          <div class="stat-card" style="text-align:center">
+            <div class="stat-label">Vocab variety (TTR)</div>
+            <div class="stat-val" id="s-ttr" style="font-size:22px">&mdash;</div>
+          </div>
+          <div class="stat-card" style="text-align:center">
+            <div class="stat-label">Words per minute</div>
+            <div class="stat-val" id="s-wpm" style="font-size:22px">&mdash;</div>
+          </div>
+          <div class="stat-card" style="text-align:center">
+            <div class="stat-label">Connectives used</div>
+            <div class="stat-val" id="s-conn" style="font-size:22px">&mdash;</div>
+          </div>
+        </div>
+      </div>
+      <div id="log-outer">
+        <table id="log-head"><thead><tr>
+          <th style="width:36px;text-align:right;padding-right:10px">#</th>
+          <th style="width:160px">Word</th>
+          <th>How entered</th>
+          <th style="width:90px;text-align:right;padding-right:12px">Time (sec)</th>
+        </tr></thead></table>
+        <div id="log-scroll">
+          <table id="log-body-tbl"><tbody id="log-body">
+            <tr><td colspan="4" style="color:#bbb;padding:10px">Words will appear here as you type&hellip;</td></tr>
+          </tbody></table>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="hint">Tip: arrow keys to browse &middot; Tab or Enter to select &middot; Esc to close &middot; Click any word for alternatives &middot; click misspelled words for corrections</div>
+
+  <div id="debug-wrap">
+    <div id="debug-toggle" onclick="toggleDebug()">
+      <span>&#128027; Debug log</span>
+      <span id="debug-arrow" style="font-size:11px">&#9660;</span>
+    </div>
+    <div id="debug-body">
+      <div id="debug-log"></div>
+      <button id="debug-copy" onclick="copyDebug()">&#128203; Copy log to clipboard</button>
+    </div>
+  </div>
+
+</div>
+
+<div id="dropdown" role="listbox"></div>
+<div id="toast"></div>
+
+<script>
+const MODES = {
+  dyslexia: {
+    label: 'Dyslexia-friendly',
+    editorFont: "'OpenDyslexic', Arial, sans-serif",
+    editorBg: '#FEFBD8',          // soft yellow — reduces visual stress/glare
+    editorColor: '#2A2A2A',       // dark grey, not pure black
+    editorLetterSpacing: '0.05em',
+    editorLineHeight: '2.1',
+    editorFontSize: '22px',
+    editorMaxWidth: '620px',      // narrower line length reduces tracking difficulty
+    dropBg: '#FEFBD8',
+    dropColor: '#2A2A2A',
+    bodyBg: '#FBF8E8',
+    appBg: '#FBF8E8',
+    desc: 'Soft yellow background · OpenDyslexic font · wide line spacing · narrow line width'
+  },
+  regular: {
+    label: 'Regular',
+    editorFont: 'Arial, sans-serif',
+    editorBg: '#ffffff',
+    editorColor: '#1a1a1a',
+    editorLetterSpacing: 'normal',
+    editorLineHeight: '1.75',
+    editorFontSize: '22px',
+    editorMaxWidth: '100%',
+    dropBg: '#ffffff',
+    dropColor: '#1a1a1a',
+    bodyBg: '#f5f7fa',
+    appBg: '#f5f7fa',
+    desc: 'Standard view'
+  },
+  highcontrast: {
+    label: 'High contrast',
+    editorFont: 'Arial, sans-serif',
+    editorBg: '#000000',
+    editorColor: '#ffffff',
+    editorLetterSpacing: '0.03em',
+    editorLineHeight: '1.9',
+    editorFontSize: '22px',
+    editorMaxWidth: '100%',
+    dropBg: '#111111',
+    dropColor: '#ffffff',
+    bodyBg: '#111111',
+    appBg: '#111111',
+    desc: 'Black background · white text · for low vision or bright environments'
+  },
+  darkblue: {
+    label: 'Dark blue',
+    editorFont: "'OpenDyslexic', Arial, sans-serif",
+    editorBg: '#0A1628',          // dark navy — yellow-on-dark-blue has strong research support
+    editorColor: '#FFE066',       // warm yellow text
+    editorLetterSpacing: '0.05em',
+    editorLineHeight: '2.1',
+    editorFontSize: '22px',
+    editorMaxWidth: '620px',
+    dropBg: '#0D1F3C',
+    dropColor: '#FFE066',
+    bodyBg: '#07101E',
+    appBg: '#07101E',
+    desc: 'Yellow on dark blue · OpenDyslexic font · strong evidence for dyslexia support'
+  },
+  large: {
+    label: 'Large text',
+    editorFont: "'OpenDyslexic', Arial, sans-serif",
+    editorBg: '#FEFBD8',
+    editorColor: '#2A2A2A',
+    editorLetterSpacing: '0.06em',
+    editorLineHeight: '2.3',
+    editorFontSize: '28px',
+    editorMaxWidth: '580px',
+    dropBg: '#FEFBD8',
+    dropColor: '#2A2A2A',
+    bodyBg: '#FBF8E8',
+    appBg: '#FBF8E8',
+    desc: 'Large 28px text · very wide spacing · for younger students or low vision'
+  }
+};
+
+let currentMode = 'dyslexia';
+
+
+function setMode(key) {
+  const m = MODES[key];
+  if (!m) return;
+  currentMode = key;
+
+  // Editor
+  const ed = document.getElementById('editor');
+  ed.style.fontFamily = m.editorFont;
+  ed.style.background = m.editorBg;
+  ed.style.color = m.editorColor;
+  ed.style.letterSpacing = m.editorLetterSpacing;
+  ed.style.lineHeight = m.editorLineHeight;
+  ed.style.fontSize = m.editorFontSize;
+  ed.style.maxWidth = m.editorMaxWidth;
+
+  // Placeholder colour — light on dark backgrounds, muted on light
+  const isDark = m.editorBg === '#000000' || m.editorBg.startsWith('#0') || m.editorBg.startsWith('#07');
+  ed.style.setProperty('--placeholder-color', isDark ? 'rgba(255,255,255,0.35)' : '#bbb');
+
+  // Dropdown
+  const dd = document.getElementById('dropdown');
+  dd.style.background = m.dropBg;
+  dd.style.borderColor = isDark ? '#444' : '#d0d0d0';
+  dd.style.color = m.dropColor;
+  // Restyle drop items text colour
+  dd.querySelectorAll('.drop-item').forEach(el => { el.style.color = m.dropColor; });
+  dd.querySelectorAll('.remain-part').forEach(el => {
+    el.style.color = isDark ? 'rgba(255,255,255,0.5)' : '#999';
+  });
+
+  // Body + app background
+  document.body.style.background = m.bodyBg;
+  document.getElementById('app').style.background = m.appBg;
+
+  // Active button highlight
+  const msel=document.getElementById('mode-select');if(msel)msel.value=key;
+
+  // Update hint
+  document.getElementById('hint').textContent =
+    m.desc + ' · Arrow keys / Tab to pick a suggestion · Esc to close';
+}
+
+// ── Inject dynamic placeholder style ──
+(function() {
+  const style = document.createElement('style');
+  style.textContent = '#editor:empty:before { color: var(--placeholder-color, #bbb); }';
+  document.head.appendChild(style);
+})();
+
+
+// ── Debug panel ──
+const debugLines = [];
+
+function debugLog(msg) {
+  const ts = new Date().toLocaleTimeString();
+  const line = '[' + ts + '] ' + msg;
+  debugLines.push(line);
+  const el = document.getElementById('debug-log');
+  if (el) {
+    el.textContent = debugLines.join('\n');
+    el.scrollTop = el.scrollHeight;
+  }
+}
+
+function toggleDebug() {
+  const body = document.getElementById('debug-body');
+  const arrow = document.getElementById('debug-arrow');
+  const open = body.classList.toggle('open');
+  arrow.innerHTML = open ? '&#9650;' : '&#9660;';
+}
+
+function copyDebug() {
+  const text = debugLines.length
+    ? 'Word Helper Debug Log\n' + new Date().toLocaleString() + '\n\n' + debugLines.join('\n')
+    : 'No debug data yet.';
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('debug-copy');
+    const orig = btn.textContent;
+    btn.textContent = '✅ Copied — paste into your email';
+    setTimeout(() => { btn.textContent = orig; }, 2500);
+  }).catch(() => {
+    // Fallback
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+    document.getElementById('debug-copy').textContent = '✅ Copied!';
+  });
+}
+
+// ── Voice — simplified male/female only ──
+let femaleVoice = null, maleVoice = null, currentVoice = null, voiceGender = 'female';
+
+function rankFemale(v) {
+  const n = v.name.toLowerCase();
+  if (!v.lang.startsWith('en')) return -1;
+  let s = v.localService ? 10 : 1;
+  // Prefer known high-quality female voices
+  if (n.includes('samantha')) return 100;
+  if (n.includes('karen')) return 95;
+  if (n.includes('moira')) return 90;
+  if (n.includes('fiona')) return 88;
+  if (n.includes('kate')) return 85;
+  if (n.includes('aria')) return 82;
+  if (n.includes('jenny')) return 80;
+  if (n.includes('sonia')) return 78;
+  if (n.includes('google uk english female')) return 75;
+  if (n.includes('google us english')) return 70;
+  if (n.includes('female') || n.includes('woman') || n.includes('girl')) return 50;
+  if (n.includes('zira')) return 40; // Microsoft Zira - female
+  return s;
+}
+function rankMale(v) {
+  const n = v.name.toLowerCase();
+  if (!v.lang.startsWith('en')) return -1;
+  let s = v.localService ? 10 : 1;
+  if (n.includes('microsoft mark')) return 100;
+  if (n.includes('daniel')) return 95;
+  if (n.includes('alex')) return 90;
+  if (n.includes('guy')) return 85;
+  if (n.includes('google uk english male')) return 82;
+  if (n.includes('male') || n.includes('man') || n.includes('boy')) return 50;
+  if (n.includes('david')) return 45; // Microsoft David
+  return s;
+}
+
+function loadVoices() {
+  const all = speechSynthesis.getVoices().filter(v => v.lang.startsWith('en'));
+  if (!all.length) return;
+  const sortedF = [...all].sort((a,b) => rankFemale(b) - rankFemale(a));
+  const sortedM = [...all].sort((a,b) => rankMale(b) - rankMale(a));
+  femaleVoice = sortedF[0] || null;
+  maleVoice = sortedM[0] || null;
+  // Default: female
+  currentVoice = femaleVoice;
+}
+speechSynthesis.onvoiceschanged = loadVoices;
+loadVoices();
+window.addEventListener('load', () => setMode('dyslexia'));
+
+function toggleVoice() {
+  voiceGender = voiceGender === 'female' ? 'male' : 'female';
+  currentVoice = voiceGender === 'female' ? femaleVoice : maleVoice;
+  const btn = document.getElementById('voice-toggle');
+  if (btn) btn.textContent = '🔊 ' + (voiceGender === 'female' ? 'Female' : 'Male');
+  if (currentVoice) speak(voiceGender === 'female' ? 'Female voice.' : 'Male voice.');
+}
+
+function speak(text, btn) {
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  if (currentVoice) u.voice = currentVoice;
+  u.rate = 0.88; u.pitch = 1.0;
+  if (btn) { const orig = btn.textContent; u.onend = () => { btn.textContent = orig; }; btn.textContent = '🔈'; }
+  speechSynthesis.speak(u);
+}
+
+// ── JS-based spell underlines ──
+// We underline misspelled words ourselves using <span class="misspelled">
+// rather than relying on the browser's native spellcheck, which is
+// inconsistent across browsers and sandboxed environments.
+
+let spellTimer = null;
+
+// Words verified as real by Datamuse — cache to avoid repeat API calls
+const verifiedWords = new Set();
+// Words confirmed as misspelled (not in Datamuse either)
+const rejectedWords = new Set();
+// Words currently being verified (pending API response)
+const pendingWords = new Set();
+
+// Check words not in our local list against Datamuse.
+// If Datamuse confirms the word is real, cache it in verifiedWords
+// and re-run the spell pass to remove the underline.
+// Minimum Datamuse score for a word to be considered "real".
+// Words like "tru", "abut", "happi" exist in obscure dictionaries
+// but score very low. Common real words score 10,000+.
+// We require a score of at least 2000 — well below common words
+// but above archaic/obscure variants that aren't children's spelling.
+const MIN_VALID_SCORE = 3000;
+
+function verifyWordWithDatamuse(word) {
+  if (pendingWords.has(word)) return;
+  pendingWords.add(word);
+
+  // Single query strategy — ask Datamuse for the word's own frequency score.
+  // We request the word itself via sp= (exact spelling match) with md=f
+  // (frequency metadata). If Datamuse returns the word with a score above
+  // our threshold, it's a real, common-enough word.
+  //
+  // Crucially we search for the word in ALL results (max=5), not just the
+  // top one — this handles cases where Datamuse returns multi-word variants
+  // (e.g. "every body") as the top result before "everybody", which would
+  // cause a top-result check to wrongly reject a valid word.
+  //
+  // For genuinely misspelled words like "begining", Datamuse returns
+  // "beginning" as the only high-scoring result, so "begining" won't
+  // appear in the results at all, correctly marking it as misspelled.
+
+  // Use TWO endpoints in parallel:
+  // A) sp=word* (prefix wildcard) — returns the word if it exists as an exact
+  //    dictionary entry, since real words always rank highest for their own prefix.
+  //    "happi" won't rank highly here; "happy" will.
+  // B) w=word (exact word frequency lookup) — returns ONLY if the exact word
+  //    exists in Datamuse's dictionary with a frequency score.
+  //    This is the definitive check: "happi" returns nothing; "everybody" returns itself.
+  //
+  // A word is valid if EITHER:
+  //   - It appears in A with score >= MIN_VALID_SCORE AND is the exact word, OR
+  //   - It appears in B with any score (existence confirmed)
+  //
+  // Using both gives redundancy — B is the strict check, A adds score gating.
+
+  // Strategy: fetch up to 5 prefix results and apply two tests:
+  //
+  // Test 1 — the word must be the TOP result (most frequent match for its
+  //   own prefix). Misspellings like "happi" lose to "happiness".
+  //
+  // Test 2 — no other result in the list should score more than 3x higher
+  //   than the word itself. "begining" tops its own prefix search but
+  //   "beginning" scores ~5x more, exposing it as a misspelling.
+  //   Real words like "everybody" have no dramatically higher-scoring rival.
+  //
+  // Both tests must pass for the word to be considered valid.
+  fetch('https://api.datamuse.com/words?sp=' + encodeURIComponent(word) + '*&max=5&md=f')
+    .then(r => r.json())
+    .then(data => {
+      pendingWords.delete(word);
+      const wl = word.toLowerCase();
+      const topResult = data[0];
+
+      // Test 1: must be the top result
+      const isTop = topResult && topResult.word.toLowerCase() === wl;
+
+      const wordScore = topResult ? (topResult.score || 1) : 1;
+      const others = data.filter(d => d.word.toLowerCase() !== wl);
+      const maxOtherScore = others.reduce((max, d) => Math.max(max, d.score || 0), 0);
+
+      // Test 2a: no rival scores more than 3x higher (catches "happi" vs "happiness")
+      const noDominantRival = maxOtherScore < wordScore * 3;
+
+      // Test 2b: require a minimum absolute score in all cases.
+      // "elefant" scores 3, "begining" scores 2003 — real children's words
+      // score much higher. Minimum of 500 filters obvious non-words while
+      // allowing less common but real words like "everybody"(1027) through.
+      const passesMinScore = wordScore >= 500;
+
+      // Test 2c: if no rivals at all, require higher score (5000).
+      // A real word that is the only result for its prefix should be common.
+      const noRivals = others.length === 0;
+      const passesNoRivalScore = !noRivals || wordScore >= 5000;
+
+      const passesA = isTop && noDominantRival && passesMinScore && passesNoRivalScore;
+      debugLog('verify "' + word + '" | top: ' + (topResult ? topResult.word + '(' + topResult.score + ')' : 'none') + ' | rival: ' + maxOtherScore + ' | ratio: ' + (maxOtherScore/wordScore).toFixed(1) + 'x' + (noRivals ? ' | NO RIVALS (min:5000)' : '') + ' | ' + (passesA ? 'VALID' : 'FLAGGED'));
+      if (passesA) {
+        verifiedWords.add(word);
+      } else {
+        rejectedWords.add(word);
+      }
+      runSpellPass(true);
+    })
+    .catch(() => {
+      pendingWords.delete(word);
+      // Datamuse unavailable — use local Levenshtein as fallback.
+      // If the word is within distance 1 of a known word, it's likely
+      // a misspelling. If no close match exists, give benefit of the doubt.
+      const wl = word.toLowerCase();
+      // A word is likely a misspelling if a known word exists within
+      // edit distance 1 AND is the same length or longer (not just a
+      // shorter root — "tells" is not a misspelling of "tell").
+      const hasCloseMatch = WORD_LIST.some(cand => {
+        const cl = cand.toLowerCase();
+        if (cl.length < wl.length) return false; // ignore shorter roots
+        if (Math.abs(cl.length - wl.length) > 1) return false;
+        return levenshtein(wl, cl) === 1;
+      });
+      debugLog('verify "' + word + '" | OFFLINE fallback | close match: ' + hasCloseMatch + ' | ' + (hasCloseMatch ? 'FLAGGED' : 'VALID'));
+      if (hasCloseMatch) {
+        rejectedWords.add(word);
+      } else {
+        verifiedWords.add(word);
+      }
+      runSpellPass(true);
+    });
+}
+
+function isLikelyMisspelled(word) {
+  const clean = word.toLowerCase().replace(/^[\'-]+|[\'-]+$/g, '');
+  if (clean.length < 2) return false;
+  if (WORD_SET.has(clean)) return false;          // in our curated list — fine
+  if (verifiedWords.has(clean)) return false;     // confirmed real by Datamuse — fine
+  if (rejectedWords.has(clean)) return true;      // confirmed bad by Datamuse — underline
+  // Not yet verified — trigger async check, don't underline yet
+  verifyWordWithDatamuse(clean);
+  return false; // innocent until proven guilty
+}
+
+function runSpellPass(skipSchedule) {
+  if (!assistOn() || editor.contentEditable !== 'true') return;
+
+  const sel = window.getSelection();
+  let caretOffset = 0;
+  if (sel.rangeCount > 0) {
+    const r = sel.getRangeAt(0).cloneRange();
+    r.setStart(editor, 0);
+    caretOffset = r.toString().length;
+  }
+
+  const fullText = editor.innerText;
+  const tokenRegex = /([a-zA-Z'\u2019-]+)|([^a-zA-Z'\u2019-]+)/g;
+  let newHtml = '';
+  let match;
+  while ((match = tokenRegex.exec(fullText)) !== null) {
+    if (match[1]) {
+      const word = match[1];
+      if (isLikelyMisspelled(word)) {
+        newHtml += '<span class="misspelled">' + escHtml(word) + '</span>';
+      } else {
+        newHtml += escHtml(word);
+      }
+    } else {
+      newHtml += match[2]
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\n/g, '<br>');
+    }
+  }
+
+  editor.innerHTML = newHtml;
+  restoreCaretOffset(editor, caretOffset);
+}
+function getEditorTextOffset(editor, targetNode) {
+  // Returns the character offset of the start of targetNode within editor's text
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+  let offset = 0;
+  let node;
+  while ((node = walker.nextNode())) {
+    if (node === targetNode) return offset;
+    offset += node.textContent.length;
+  }
+  return offset;
+}
+
+function restoreCaretOffset(el, offset) {
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  let remaining = offset;
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    if (remaining <= node.textContent.length) {
+      const r = document.createRange();
+      r.setStart(node, remaining);
+      r.collapse(true);
+      sel.addRange(r);
+      return;
+    }
+    remaining -= node.textContent.length;
+  }
+  // Fallback: end of editor
+  const r = document.createRange();
+  r.selectNodeContents(el);
+  r.collapse(false);
+  sel.addRange(r);
+}
+
+function clearSpellMarks() {
+  // Remove all misspelled spans, preserving text
+  editor.querySelectorAll('.misspelled').forEach(span => {
+    span.replaceWith(document.createTextNode(span.textContent));
+  });
+  editor.normalize();
+}
+
+function scheduleSpellPass() {
+  clearTimeout(spellTimer);
+  // Run after a short pause so we don't interrupt mid-word typing
+  spellTimer = setTimeout(() => runSpellPass(false), 800);
+}
+
+function toggleAssist() {
+  const on = document.getElementById('assist-toggle').checked;
+  if (!on) {
+    clearSpellMarks();
+    hideDD('toggleAssist');
+  } else {
+    scheduleSpellPass();
+    if (editor.contentEditable === 'true') editor.focus();
+  }
+}
+
+function onNameBlur() {
+  if (assistOn() && editor.contentEditable === 'true') {
+    scheduleSpellPass();
+  }
+}
+
+function assistOn() {
+  return document.getElementById('assist-toggle').checked;
+}
+
+// ── Name gate ──
+function onNameInput() {
+  const name = document.getElementById('sname').value.trim();
+  const msg = document.getElementById('name-msg');
+  const label = document.getElementById('name-label');
+  const inp = document.getElementById('sname');
+  if (name.length > 0) {
+    editor.contentEditable = 'true'; editor.style.opacity = ''; editor.style.cursor = '';
+    editor.style.background = ''; editor.setAttribute('data-placeholder', 'Start typing here…');
+    msg.style.display = 'none'; label.style.color = '#555'; label.style.fontWeight = '400';
+    label.textContent = 'Student name:'; inp.style.borderColor = ''; inp.style.background = ''; inp.style.fontWeight = '';
+    setMode(currentMode);
+  } else {
+    editor.contentEditable = 'false'; editor.style.opacity = '0.45'; editor.style.cursor = 'not-allowed';
+    editor.style.background = '#f5f7fa'; editor.setAttribute('data-placeholder', 'Type your name above first…');
+    msg.style.display = 'block'; label.style.color = '#993C1D'; label.style.fontWeight = '600';
+    label.textContent = '★ Your name:'; inp.style.borderColor = '#F0997B'; inp.style.background = '#fdf3f0'; inp.style.fontWeight = '500';
+  }
+}
+
+function toggleStats() {
+  const body = document.getElementById('stats-body');
+  const arrow = document.getElementById('stats-arrow');
+  const open = body.classList.toggle('open');
+  arrow.classList.toggle('open', open);
+  document.getElementById('stats-toggle').setAttribute('aria-expanded', open);
+}
+
+// ── Session ──
+// Writing time: counts only active periods (keypresses/insertions).
+// Total time: wall clock from first action to last action.
+// Idle threshold: if no activity for IDLE_MS ms, writing time pauses.
+const IDLE_MS = 5000;
+
+const sess = {
+  start: null,
+  timer: null,
+  log: [], spellCount: 0,
+  writingSecs: 0,
+  activeStart: null,
+  lastActivity: null,
+  idleTimer: null,
+  // Timeline events for graph: {type, t} where t is seconds from session start
+  // types: 'write_start','write_end','listen','suggestion','correction'
+  events: [],
+};
+
+function fmtTime(secs) {
+  const m = Math.floor(secs/60), s = secs % 60;
+  return m + '<span class="stat-unit">m ' + String(s).padStart(2,'0') + 's</span>';
+}
+
+function tSec() { return sess.start ? (Date.now() - sess.start) / 1000 : 0; }
+
+function recordActivity() {
+  const now = Date.now();
+  if (!sess.start) {
+    sess.start = now;
+    sess.timer = setInterval(refreshStats, 1000);
+  }
+  if (!sess.activeStart) {
+    sess.activeStart = now;
+    sess.events.push({ type: 'write_start', t: tSec() });
+  }
+  sess.lastActivity = now;
+  clearTimeout(sess.idleTimer);
+  sess.idleTimer = setTimeout(() => {
+    if (sess.activeStart) {
+      sess.writingSecs += Math.round((Date.now() - sess.activeStart) / 1000);
+      sess.events.push({ type: 'write_end', t: tSec() });
+      sess.activeStart = null;
+    }
+  }, IDLE_MS);
+}
+
+function recordListen() {
+  if (sess.start) sess.events.push({ type: 'listen', t: tSec() });
+  recordActivity();
+}
+
+function recordSuggestion() {
+  if (sess.start) sess.events.push({ type: 'suggestion', t: tSec() });
+}
+
+function recordCorrection() {
+  if (sess.start) sess.events.push({ type: 'correction', t: tSec() });
+}
+
+function startTimer() { recordActivity(); }
+
+function getWritingSecs() {
+  return sess.activeStart
+    ? sess.writingSecs + Math.round((Date.now() - sess.activeStart) / 1000)
+    : sess.writingSecs;
+}
+
+function getTotalSecs() {
+  return sess.start ? Math.floor((Date.now() - sess.start) / 1000) : 0;
+}
+
+function refreshStats() {
+  const wSecs = getWritingSecs();
+  const tSecs = getTotalSecs();
+  document.getElementById('s-wtime').innerHTML = fmtTime(wSecs);
+  document.getElementById('s-ttime').innerHTML = fmtTime(tSecs);
+  const pct = tSecs > 0 ? Math.round(wSecs / tSecs * 100) : 0;
+  document.getElementById('s-wpct').textContent = sess.start ? pct + '%' : '—';
+  const txt = editor.innerText.trim();
+  const wc = txt ? txt.split(/\s+/).filter(Boolean).length : 0;
+  document.getElementById('s-words').textContent = wc;
+  const sugg = sess.log.filter(e => e.how === 'suggestion').length;
+  const spell = sess.log.filter(e => e.how === 'corrected').length;
+  const typed = sess.log.filter(e => e.how === 'typed').length;
+  document.getElementById('s-sugg').textContent = sugg;
+  document.getElementById('s-spell').textContent = spell;
+  document.getElementById('s-typed').textContent = typed;
+  const total = sess.log.length;
+  document.getElementById('s-rate').textContent = total > 0 ? Math.round((sugg+spell)/total*100) + '%' : '—';
+  // ── TTR, WPM, connectives ──
+  const rawText = editor.innerText.trim();
+  const allWords = rawText ? rawText.toLowerCase().split(/\s+/).filter(w => /[a-z]/.test(w)) : [];
+  const uniqueWords = new Set(allWords);
+  const ttr = allWords.length >= 5 ? (uniqueWords.size / allWords.length).toFixed(2) : null;
+  document.getElementById('s-ttr').textContent = ttr !== null ? ttr : '—';
+  const wSecs2 = getWritingSecs();
+  const wpm = (wSecs2 > 0 && allWords.length > 0) ? Math.round(allWords.length / (wSecs2 / 60)) : null;
+  document.getElementById('s-wpm').textContent = wpm !== null ? wpm : '—';
+  const CONNECTIVES = new Set(['and','but','or','so','yet','for','nor','because','although','though',
+    'even','while','whereas','unless','until','since','after','before','when','if','that','which',
+    'however','therefore','furthermore','meanwhile','nevertheless','consequently','additionally',
+    'moreover','otherwise','instead','finally','firstly','secondly','also','then','next','suddenly',
+    'eventually','later','earlier','besides','despite','except']);
+  const connCount = allWords.filter(w => CONNECTIVES.has(w)).length;
+  document.getElementById('s-conn').textContent = sess.start ? connCount : '—';
+  drawGraph();
+}
+function logWord(word, how) {
+  const t = sess.start ? ((Date.now()-sess.start)/1000).toFixed(1) : '0';
+  sess.log.push({ word, how, t });
+  const tbody = document.getElementById('log-body');
+  if (sess.log.length === 1) tbody.innerHTML = '';
+  const idx = sess.log.length;
+  const tr = document.createElement('tr');
+  const tagClass = how === 'suggestion' ? 'tag-s' : how === 'corrected' ? 'tag-c' : 'tag-t';
+  const tagLabel = how === 'suggestion' ? '⬆ suggestion' : how === 'corrected' ? '✓ spell fix' : '⌨ typed';
+  tr.innerHTML = '<td style="text-align:right;padding-right:10px">' + idx + '</td>'
+    + '<td><strong>' + word + '</strong></td>'
+    + '<td class="' + tagClass + '">' + tagLabel + '</td>'
+    + '<td style="text-align:right;padding-right:12px">' + t + 's</td>';
+  tbody.appendChild(tr);
+  document.getElementById('log-scroll').scrollTop = 99999;
+  refreshStats();
+}
+
+// ── Word list ──
+const BLOCK = new Set([
+  'anus','anal','arse','arses','ass','asses','asshole','assholes','bastard','bastards',
+  'bitch','bitches','bitching','bollock','bollocks','bonk','boob','boobs','booby',
+  'boner','brothel','bugger','buggered','buggering','buggers','bullshit','butt','butts',
+  'clitoris','cock','cocks','coital','coitus','condom','condoms','coon','coons',
+  'crap','crapper','craps','cum','cums','cumming','cunt','cunts',
+  'damn','damned','dick','dicks','dildo','dildos','dipshit','douche','douchebag',
+  'dyke','dykes','erection','ejaculate','ejaculation','erotic','erotica',
+  'fag','faggot','faggots','fags','fanny','fart','farts','farting',
+  'fellatio','fetish','fondle','fuck','fucked','fucker','fuckers','fucking','fucks','fuckup',
+  'gangbang','gay','gays','genitals','goddamn','gonorrhea',
+  'handjob','hardcore','hentai','homo','homos','hooker','hookers','horny','hump','humping',
+  'incest','intercourse',
+  'jackass','jerkoff','jizz',
+  'kike','kikes',
+  'labia','lesbian','lesbians','lesbo','lesbos','lust','lusting',
+  'masturbate','masturbation','milf','molest','molestation',
+  'naked','nigga','niggas','nigger','niggers','nipple','nipples','nude','nudity','nympho',
+  'orgasm','orgasms','orgy',
+  'paki','pakis','panties','pecker','pedophile','penis','pervert','perverts','phallus',
+  'pimp','pimps','piss','pissed','pisser','pissing','porno','pornography','pussy','pussies',
+  'queer','queers',
+  'rape','raped','rapist','rapists','rectum','retard','retarded','rimjob',
+  'scrotum','semen','sex','sexting','sexual','sexually','sexy','shit','shits','shitty',
+  'shitting','skank','skanks','slut','slutty','sluts','smegma','sodomy','spank','sperm',
+  'spic','spics','stripper','strippers',
+  'testicle','testicles','tit','tits','titties','titty','tosser','turd','twat','twats',
+  'urethra','urine','vagina','vaginal','vibrator','vulva',
+  'wank','wanker','wankers','wanking','wetback','whore','whores','whorehouse',
+  'xxx',
+  'dickhead','dickheads','asswipe','asswipes','butthead','buttheads',
+  'nudie','nudies','fuckhead','fuckheads','shithead','shitheads','arsehead',
+  'arsehole','arseholes','wanker','wankers','bellend','bellends','knobhead','knobheads'
+]);
+
+// Short roots that are safe to substring-check (won't appear inside innocent common words).
+// Longer roots (5+ chars) in BLOCK are also substring-checked below.
+const BLOCK_ROOTS = new Set([
+  'fuck','shit','slut','twat','wank','rape','porn','arse','fart',
+  'dyke','nude','lust','damn'
+]);
+
+function isBlocked(word) {
+  const w = word.toLowerCase().replace(/[^a-z]/g, '');
+  // 1. Exact whole-word match
+  if (BLOCK.has(w)) return true;
+  // 2. Substring check for longer roots (5+ chars) — low false-positive risk at this length
+  //    Catches compound/hyphenated forms like "bullshitting", "assholes", "fucker" etc.
+  for (const b of BLOCK) {
+    if (b.length >= 5 && w.includes(b)) return true;
+  }
+  // 3. Substring check for safe short roots — catches "shithead", "fuck-boy", "wanker" etc.
+  //    These roots were verified not to appear inside common innocent English words.
+  for (const b of BLOCK_ROOTS) {
+    if (w.includes(b) && w.length > b.length) return true;
+  }
+  return false;
+}
+
+
+const WORD_LIST = ["a","abandon","abide","abilities","ability","able","abnormal","abolish","about","above","absence","absorb","absorbing","abstract","abundant","abuse","academic","accelerate","accent","accept","accepting","access","accessing","accident","accidents","accommodate","accomplish","accomplishment","account","accumulate","accurate","ache","achieve","achievement","achieving","aching","acid","acknowledge","across","act","acted","acting","action","actions","activate","active","activity","actor","actress","actual","actually","acute","adapt","add","added","adding","addition","additional","address","addresses","adequate","adjust","admire","adopt","adorable","adore","adult","advance","advanced","advantage","adventure","adventures","adventurous","advertise","advertisement","advice","advise","affect","afford","affordable","afraid","Africa","after","afternoon","afternoons","again","against","aggressive","agree","agreement","ahead","aim","air","airfield","airport","alarm","album","alert","alerting","algebra","algorithm","alike","alive","all","alliance","alligator","allocate","allow","allowance","allowed","allowing","almighty","along","alphabet","also","alter","although","altogether","always","am","amazed","amazing","ambitious","ambulance","America","among","amongst","amount","amusing","an","analyse","ancestor","anchor","ancient","and","angle","angry","animal","animals","anniversary","announce","announcement","answer","answered","answering","answers","ant","Antarctica","anxiety","anxious","any","anyone","anything","anyway","anywhere","apart","apologise","apostrophe","app","apparently","appeal","appealing","appear","apple","apples","apply","applying","appointment","appreciate","approach","appropriate","approval","approve","approximate","approximately","April","archipelago","architect","Arctic","are","area","aren't","argue","argument","arguments","arm","around","arrange","arrangement","arranging","arrive","arrived","arriving","arrowroot","article","artificial","artist","artists","arvo","as","ashamed","Asia","aside","ask","asked","asking","assemble","assist","assume","astronaut","at","ate","athlete","athletes","Atlantic","atmosphere","atoll","atom","attach","attack","attempt","attempts","attend","attending","attention","attitude","attract","attractive","audience","August","aunt","Australia","author","authorise","automatic","autumn","available","average","avocado","avoid","avoiding","award","aware","awareness","away","awesome","awful","awkward","axe","axis","babies","baby","back","backbone","background","backyard","bacon","bacteria","badly","badminton","bag","bake","baked","baker","baking","balance","balanced","balancing","ball","ballet","balloon","balloons","ballpark","balls","ban","banana","bananas","band","bang","banged","banging","banning","bare","bargain","bark","barked","barking","barn","barricade","barrier","base","basement","basic","basin","basis","basketball","bat","bath","bathe","bathed","bathing","bathroom","battery","battle","bay","be","beach","beaches","bean","beans","bear","bears","beat","beautiful","beauty","beaver","because","becomes","bed","bedroom","bedrooms","bee","been","bees","beetle","beetles","before","began","begin","beginning","behave","behind","belief","believe","believed","believing","bell","bells","belong","belonged","belonging","below","beneath","beneficial","benefit","berries","berry","beside","besides","best","bestseller","better","between","beyond","bicycle","big","bill","billabong","billowing","biography","bird","birds","birthday","biscuit","biscuits","bite","bitten","bitter","black","blade","blame","blank","blanket","blankets","blast","blaze","blazing","blend","blending","bless","blessing","blew","blink","block","blocking","bloom","blossom","blossoms","blow","blowing","blue","blueprint","boast","boat","boats","body","boiling","bold","bone","bones","book","bookcase","bookmark","books","bookshelf","boomerang","border","bored","boring","borrowing","both","bother","bottle","bottles","bottom","boulders","bounce","bounced","bouncing","bound","boundary","bouquet","bowl","box","boxes","boy","boys","brain","branch","branches","brave","bravery","bread","break","breakfast","breaking","breath","breathe","breathless","breeze","brekkie","brew","brewery","bricks","bridge","bridges","brief","briefing","briefly","bright","brightness","brilliant","bring","broad","broccoli","broken","brolly","brother","brotherhood","brown","browsing","bruise","brush","bubble","bubbles","buffet","bug","bugs","build","builder","building","built","bumpy","bunch","bundle","bunny","burden","burn","burned","burning","bus","buses","bushfire","busy","but","butter","butterflies","butterfly","button","buttons","buy","buzzing","by","cabinet","cable","cactus","cage","cages","cake","cakes","calculate","calculating","calendar","call","called","calling","calm","came","camel","camera","campaign","camper","campfire","campus","can","canal","cancel","cancelling","candle","candles","candy","cannot","can't","canteen","canvas","canyon","capable","capacity","cape","capital","captain","caption","capture","car","caravan","carbon","cards","care","career","careful","careless","carelessness","caretaker","cargo","carried","carrot","carry","carrying","cars","cart","carton","cartoon","castle","cat","catch","catching","categorise","caterpillar","caught","cause","caused","causing","cautious","cave","caves","cease","ceiling","celebrate","celebrated","celebrating","celebration","cell","census","centimetre","century","cereal","certain","chair","chairs","challenge","challenging","champion","change","changed","changing","channel","chapel","chapter","character","characters","charge","charitable","chart","chase","chased","chasing","chat","check","checked","checking","cheek","cheer","cheerful","cheerfulness","cheese","cheetah","chef","chemical","chest","chew","chewed","chewing","chicken","child","childhood","children","chilly","chimney","chimpanzee","chin","chips","chlorophyll","chocolate","choice","chook","choose","choosing","chord","chorus","chose","chubby","circle","circumference","circus","citizen","city","civilian","claim","claimant","clap","clapped","clapping","clarify","clash","class","classify","classifying","classroom","clause","clay","clean","cleaned","cleaning","clearing","clever","cleverness","click","cliff","climate","climb","climbed","climbing","close","closed","closet","closing","cloud","clouds","cloudy","club","clubhouse","clue","clueless","clumsy","coach","coast","coat","cobra","cockroach","coconut","code","cognitive","coincide","cold","collaborate","collaborating","collage","collapse","collect","collected","collecting","collection","collide","colour","coloured","colourful","colours","column","combative","combine","combining","come","comfort","comfortable","comma","command","commanding","comment","commission","committee","commodity","communicate","community","compact","compare","comparing","compass","compassionate","compete","competing","compile","complaint","complete","completing","complex","compose","compost","compound","comprehensive","compress","computer","computers","concentrate","concentrating","concern","concerned","conclusion","condense","condition","cone","confidence","confident","confirm","confirming","conflict","confuse","confused","confusing","connect","consider","considering","consistent","consonant","constant","construct","constructing","consult","contain","content","contest","continent","continue","contraction","contrary","contrast","contribute","contribution","control","controlling","conventional","conversation","convince","convincing","cook","cookbook","cooked","cookie","cooking","cool","cooperate","cooperating","coordinate","cope","copper","copy","core","corn","corner","correct","costume","cottage","could","couldn't","council","counsel","count","counted","counting","countless","countries","country","countryside","courage","courageous","cousin","cover","covered","cow","cowardly","crab","craft","crane","crash","crawl","crawled","crawling","crazy","cream","create","created","creating","creation","creative","creature","creatures","creepy","crest","crew","cricket","cried","crime","crisis","crispy","critical","criticise","criticising","criticism","crocodile","cross","crowd","crowded","crown","crucial","crumble","cry","crying","crystal","cube","cucumber","cultural","culture","cunning","cup","cupboard","cups","curious","current","curriculum","curtain","curved","cushion","customise","customising","cut","cute","cycle","cyclone","cylinder","dad","daily","damage","damaging","damp","dance","danced","dancer","dances","dancing","danger","dangerous","dangers","daring","dark","darkness","data","daughter","dawn","day","daydream","daylight","days","daytime","dazzle","dazzling","deadline","deal","dear","debate","debating","decade","decay","December","decent","decide","decided","deciding","decimal","decision","decisions","decorating","decoration","decoy","decrease","dedicate","dedicating","deep","deeply","deer","defeat","defend","define","defining","definition","degree","delay","delaying","delete","delicate","delicious","delight","delighted","deliver","delta","demand","demanding","democracy","demonstrate","demonstrating","denominator","dense","dentist","depend","depict","depth","describe","described","describing","desert","design","designing","desire","desperate","despite","destination","destroy","detail","detailed","detective","determine","determined","determining","develop","developing","development","device","devote","devour","devout","diagonal","diagram","dialogue","diamond","dictionary","did","didn't","differ","difference","different","differing","difficult","dig","digest","digging","digit","digital","dimension","dingo","dinner","dinners","dinosaur","dinosaurs","direct","direction","dirt","dirty","disagree","disappear","disappointed","discard","discover","discovered","discovering","discovery","discuss","disgrace","disguise","disgusted","dishonest","dislike","dismiss","disorder","displace","display","displaying","dispute","dissolve","distance","distress","distribute","distributing","district","distrust","diverse","divide","division","dizzy","do","doctor","doctors","document","dodge","does","doesn't","dog","dogs","doll","dolphin","dolphins","dominant","dominate","dominating","done","don't","door","doorbell","doors","doorstep","doorway","double","doubling","doubt","dough","down","downfall","download","downstairs","downtown","dozen","drag","dragon","dragonfly","dragons","drama","dramatic","draw","drawer","drawing","drawings","drawn","dread","dream","dreamed","dreamer","dreaming","dreams","drench","dress","dressed","dressing","dribble","dried","drink","drive","driver","driveway","drop","dropped","dropping","drum","drums","dry","drying","duck","ducks","dug","dull","dunno","duplicate","durable","during","dusk","dusty","duty","dynamic","eager","eagle","eagles","ear","early","earn","earnest","earth","earthquake","earthworm","east","eat","eclipse","ecosystem","editorial","effect","effective","efficient","effort","egg","eggs","eight","eighteen","eighth","eighty","either","elaborate","elbow","election","electricity","elegant","element","elephant","elephants","eleven","eliminate","eliminating","elsewhere","email","embarrassed","embryo","emerald","emergency","emotion","emotional","emphasise","emphasising","employ","empty","enable","enabling","encourage","encouraging","ending","endless","endure","enemy","energetic","energy","enforce","engine","engineer","engines","enhance","enjoy","enjoyed","enjoying","enormous","entire","entrance","environment","environmental","equal","equation","equator","equipment","erosion","error","eruption","escape","esky","essay","essential","establish","establishing","estimate","estuary","ethical","eucalyptus","Europe","evaluate","evaluating","evaporate","even","evening","event","events","eventual","eventually","every","everyone","everything","everywhere","evidence","evident","evil","evoke","evolution","evolve","exact","examine","examining","example","examples","excellent","except","exception","exceptional","exchange","excited","exciting","exclamation","exclude","excluding","exclusive","excuse","execute","executing","executive","exercise","exhaust","exhausted","exhibit","exhibition","exist","exit","expand","expect","expedition","experience","experiencing","experiment","experimenting","explain","explanation","explicit","explode","explore","explored","explorer","exploring","express","expressing","expression","extend","extended","external","extra","extreme","eye","eyes","fable","faces","fact","factor","factory","fail","failing","failure","faint","fair","fairground","faithful","falcon","fall","fallen","falling","falter","fame","familiar","families","family","famous","fancy","fantastic","fantasy","far","farm","farmer","farmers","farmyard","fast","father","fault","fearful","fearless","feather","feature","featuring","February","feedback","feel","feeling","feelings","feet","felt","fern","ferry","fertilise","festival","fiction","field","fields","fierce","fifteen","fifth","fifty","fight","fighter","figurative","figure","file","fill","filled","filling","filter","filthy","final","finally","find","finger","fingers","finish","fire","firefighter","fires","firework","firm","first","fish","fitness","five","fix","fixed","flame","flames","flamingo","flashlight","flat","flavour","flee","flexible","flight","float","floated","flood","floor","flour","flourish","flow","flower","flowers","fluffy","fluster","flute","fly","flying","focus","focusing","folder","follow","followed","following","foolish","foot","football","footpath","footprint","footy","for","forbid","force","forehead","foreign","forest","forests","forever","forget","forgive","forgotten","formal","formula","formulate","formulating","forty","forward","fossil","fought","found","foundation","four","fourteen","fourth","fox","fraction","fragile","frail","frame","free","freedom","freeze","frenzy","frequent","fresh","friction","Friday","fridge","friend","friendly","friends","friendship","frightened","frightening","frog","frogs","from","frost","frosty","frown","frozen","frugal","fruit","fruits","frustrated","full","fulltime","function","fundamental","fungus","funny","furious","furniture","furthermore","fury","future","galah","galaxy","gallery","game","games","garage","garden","gardens","garlic","gas","gateway","gather","gathering","gave","gaze","gecko","gem","general","generate","generating","generation","generous","genius","gentle","genuine","geometry","germinate","gesture","get","giant","gift","gifts","gigabyte","gigantic","giggle","giggled","giggling","giraffe","girl","girls","give","given","giving","glacier","glad","gleam","glitch","global","gloom","gloomy","glorious","glory","glossary","glossy","glove","glow","glue","gnaw","go","goal","goals","goat","goes","going","gold","goldfish","golf","good","goodness","gorge","gorgeous","gorilla","got","govern","governing","government","grab","grabbed","grabbing","graceful","gracious","gradual","grammar","grandchild","grandeur","grandfather","grandma","grandmother","grandpa","grant","grape","grapes","graph","graphic","grass","grasses","grassland","grateful","gravity","great","greedy","green","greet","grey","grief","grin","ground","grounds","group","grow","growing","growl","grown","grownup","growth","grumpy","guard","guardian","guess","guessed","guessing","guide","guilt","gulf","gum","gymnasium","habit","habitat","had","hadn't","hair","half","hammer","hamster","hand","handbag","handball","handle","hands","handshake","hang","happen","happened","happening","happiness","happy","harbour","hard","hardship","harm","harmful","harmless","harmony","harsh","harvest","has","hasn't","haunted","have","haven't","he","head","headline","headphone","headquarters","healthy","hear","heard","hearing","heart","hearts","heavy","he'd","hedgehog","heel","height","helicopter","he'll","helmet","help","helper","helpful","helpless","hemisphere","her","here","here's","heritage","hero","hers","he's","hexagon","hidden","hide","hiding","high","highland","highlight","highlighting","highway","hilarious","hill","hills","him","hip","hippopotamus","his","hockey","hold","hole","hollow","home","homeless","homes","homework","homophone","honest","honey","honeybee","honour","hop","hopeful","hopeless","hopped","hopping","horizon","horizontal","horrible","horrified","horror","horse","horseback","horses","hot","hotel","hour","house","household","houses","how","however","how's","hug","huge","hugged","hugging","humble","humorous","hundred","hundredth","hungry","hunt","hunted","hunter","hunting","hurdle","hurricane","hurried","hurry","hurrying","hurt","hypothesis","i","I","ice","icy","I'd","idea","ideal","ideas","identical","identify","identity","idiom","idiotic","if","ignore","I'll","illustrate","illustrating","I'm","imagination","imagine","imagined","imagining","immediate","immediately","immense","impact","implement","implementing","impolite","important","impossible","impress","impression","improve","improvement","improving","in","inch","include","incorrect","increase","incredible","indeed","independence","independent","index","indicate","indicating","individual","indoor","inference","inferior","influence","inform","informal","information","ingredient","inherit","initial","injury","innocent","innovative","insect","insects","inside","insist","inspect","inspire","inspiring","install","instead","instinct","instruct","instructing","instruction","instrument","insulate","integer","intellectual","intelligent","intend","intense","interactive","interest","interesting","internal","internet","interpret","interpretation","interpreting","interview","into","introduce","introduction","invention","inventor","investigate","investigating","investigation","invisible","invitation","invite","invited","involve","is","island","islands","isn't","isolate","issue","it","itchy","item","it's","its","itself","I've","jacket","jagged","jaguar","jam","January","jar","jars","jaw","jawbone","jealous","jetty","jogging","joint","jolly","journal","journey","journeys","joyful","judge","juice","juicy","July","jump","jumped","jumping","jumpy","June","jungle","jungles","just","justify","justifying","kangaroo","kayak","keep","keeper","keyboard","kick","kicked","kicking","kilogram","kilometre","kind","kindness","king","kingdom","kings","kiss","kissed","kitchen","kitten","kittens","kitty","knee","knock","knocked","knocking","know","knowledge","koala","kookaburra","label","lacrosse","ladder","ladders","ladybug","lagoon","lair","lake","lakes","lamp","lamps","land","landed","landing","lands","landscape","lane","language","large","larrikin","last","latitude","laugh","laughed","laughing","launch","launching","lava","layer","lazy","leader","leadership","leaf","lean","leap","learn","learned","learning","leave","leaves","left","leg","legend","lemon","length","leopard","let","let's","letter","letters","lettuce","librarian","libraries","library","lifelong","lifestyle","lift","lifted","lifting","light","lighthouse","lightning","lights","like","likelihood","likewise","limitation","limited","link","lion","lions","lip","liquid","listen","listened","listening","literacy","literature","litre","little","live","livelihood","lively","lizard","lizards","load","loaf","lobster","locate","location","logical","login","lonely","long","longitude","look","loosen","lose","loss","lost","loud","love","loved","lovely","loving","lowland","loyal","luck","lucky","lunch","lunchbox","lunchtime","ma'am","machinery","made","magazine","magic","magical","magnet","magnetic","magnificent","magpie","mailbox","main","mainstream","maintain","maintaining","major","make","maker","mammal","man","manage","managing","manatee","mango","manipulate","manipulating","manner","manual","many","map","marathon","march","March","marched","marching","mark","market","marsh","martial","marvel","mass","massive","match","mate","material","matter","mature","May","may","me","meadow","mean","meaning","meanwhile","measure","meat","median","medicine","Mediterranean","meerkat","meet","meeting","melancholy","melody","melon","melt","melted","melting","membership","memorise","memorising","memory","men","mental","mention","merit","message","messy","metaphor","meteor","method","metre","mice","microphone","microscope","middle","midnight","midpoint","mighty","milk","millimetre","mind","mine","mineral","miniature","minimal","minus","minute","miracle","mirror","miserable","mislead","misplace","misread","mission","mist","mistake","misuse","mix","mixture","mobile","mode","model","moderate","modify","moisture","molecule","moment","Monday","money","monitor","monitoring","monkey","monkeys","month","monthly","monument","moon","moonlight","moons","moose","moral","moreover","morning","mosaic","moss","mostly","moth","mother","mothers","motif","motion","motivate","motivating","motive","motorway","mount","mountain","mountains","mouse","move","moved","moving","mozzarella","much","mud","muddy","multiple","multiply","mum","mural","muscle","museum","mushroom","musical","musician","must","mustn't","mutual","my","myself","mysteries","mysterious","mystery","myth","nail","name","names","narrative","narrator","narrow","nasty","nation","national","natural","nature","naughty","navigate","navigating","near","nearby","neat","necessary","neck","negative","negotiate","negotiating","neighbour","neighbourhood","nervous","nest","nests","netball","network","neutral","never","nevertheless","new","next","nice","night","nightmare","nights","nighttime","nine","nineteen","ninety","ninth","no","noble","nobody","noisy","nonfiction","noodle","normal","north","northeast","northwest","nose","not","note","notebook","nothing","notice","notify","notifying","notion","novel","November","now","nowhere","number","numbers","numeracy","numerator","nurse","nut","nutrition","nutritious","oat","object","objective","observation","observe","observing","obstacle","obtain","obtuse","obvious","occur","ocean","oceans","o'clock","octagon","October","octopus","odd","of","off","offer","offline","often","old","olive","on","once","one","onion","online","only","onomatopoeia","onto","open","operate","opinion","opportunity","oppose","opposite","optional","or","orange","oranges","orbit","orchestra","ordinary","organic","organisation","organise","organising","organism","origin","original","ostrich","otherwise","otter","our","ourselves","out","outback","outcome","outdoor","outline","outrage","outside","outstanding","oval","over","overcome","overcoming","overlook","overnight","overview","overwhelmed","overwhelming","owl","owls","own","ownership","oxygen","pace","Pacific","paddle","painful","paint","painted","painter","painting","paintings","palace","pale","palette","panda","paper","paperback","parable","paragraph","parallel","parent","park","parks","parrot","participate","participating","particle","particular","partnership","party","pass","passed","passport","password","past","pasta","path","paths","patience","pattern","pavement","pavlova","paws","paycheck","peaceful","peach","peacock","peak","pear","peculiar","peel","peeled","peer","pelican","penalty","pencil","pencils","penguin","peninsula","penniless","pentagon","people","pepper","percentage","perfect","perform","performing","perhaps","perimeter","permanent","permission","permit","persist","personal","personality","perspective","persuade","persuading","persuasion","petal","phase","phone","photograph","photosynthesis","physical","pick","picked","picking","picture","pictures","pier","pierce","pig","pigs","pillow","pilot","pink","pixel","pizza","plain","plan","plane","planet","planets","plant","planted","planting","plants","plateau","platform","platypus","play","player","playful","playground","playing","please","pledge","plot","plum","plunge","plus","pocket","poem","pointed","pointless","police","polish","polished","polite","political","pollen","pollinate","pollution","polygon","pond","ponds","pools","popular","population","porcupine","port","portrait","position","positive","possess","possible","potato","potential","pottery","pound","pour","poured","powerful","powerless","practical","practice","practised","practising","praying","precious","precise","predator","predict","predicting","prefix","prehistoric","prepare","prepay","preschool","present","presentation","presenting","preserve","pressure","pretty","prevent","preventing","preview","prey","price","pride","primary","prime","primitive","prince","princess","principal","print","priority","prism","prison","privilege","prize","probability","problem","procedure","process","produce","producing","product","productive","profession","professional","profound","program","progress","progressive","project","promote","promoting","pronoun","proof","propaganda","proper","property","proportion","proposal","propose","protect","protein","protest","proud","prove","provide","providing","province","psychological","publication","publish","puddle","pull","pulling","pumpkin","punctuation","punishment","puppy","purple","purpose","pursue","pursuing","push","pushed","put","puzzle","puzzled","puzzles","pyramid","python","qualification","quality","quarter","queen","queens","question","questioning","quick","quickness","quiet","quotation","rabbit","rabbits","raccoon","race","radical","radius","rage","railway","rain","rainbow","rainbows","raincoat","rainforest","raise","ran","range","rapid","rare","ratio","rational","raven","raw","reach","reached","reaching","react","reacting","reaction","read","reader","reading","realise","realistic","reality","reason","reasonable","rebel","rebuild","recent","reckon","recognise","recognising","recommend","recommendation","recommending","record","recount","recover","recovering","rectangle","recycle","red","reduce","reducing","reef","refer","reference","reflect","reflecting","reflection","reflex","reform","region","regional","regular","regulate","regulation","rehearse","reign","reindeer","reinforce","relate","relationship","relaxation","relaxed","relay","release","relevant","reliable","relief","relieved","religion","rely","remainder","remains","remarkable","remedy","remember","remembered","remembering","remind","reminder","remote","remove","renew","repair","replace","report","reporting","represent","reproduce","reptile","reputation","request","requesting","require","reread","rescue","research","resist","resistance","resolution","resolve","resolving","resource","respire","respond","responding","responsibility","responsible","rest","restless","restore","result","rethink","retreat","retrieve","return","reuse","reveal","revenue","reverse","review","reviewing","revise","revolt","reward","rewrite","rhinoceros","rhyme","rhythm","rice","rich","ridden","ride","ridge","riding","right","rigid","ring","rise","rising","risk","rival","river","rivers","road","roads","robin","robot","robots","robust","rock","rocket","rocks","rocky","role","roll","rolled","rolling","roof","room","rooms","rooster","roots","rot","rotate","rough","round","route","routine","rubbish","rugby","rule","ruler","rulers","run","runner","running","runway","rural","rush","rusty","sacred","sacrifice","sad","sadness","safe","said","salad","salamander","salmon","sand","sandcastle","sandstorm","satellite","satisfaction","Saturday","sauce","savanna","save","saved","saving","saw","say","scale","scared","scary","scatter","scenery","schedule","school","schools","scientific","scientist","score","scorpion","scout","screen","scruffy","sculpture","seafood","seahorse","seal","search","searched","searching","seashore","seaside","season","seasons","seaweed","second","secondary","section","secure","see","seed","seeds","select","selecting","selection","selfish","send","sensation","sense","sensitive","sent","sentence","separate","separating","September","sequence","serious","serve","server","servo","setting","settle","seven","seventeen","seventh","seventy","severe","shadow","shake","shaken","shaking","shall","shape","share","shark","sharks","sharp","she","she'd","sheep","sheila","shelf","she'll","shell","shells","shelter","she's","shift","shine","shining","shiny","ship","shock","shocked","shoe","shoes","shone","shore","short","shortage","shoulder","shouldn't","shout","shouted","shouting","show","showing","shown","shy","sickness","side","signal","significant","silence","silly","silver","similar","simile","simple","simplicity","since","sing","singer","singular","sink","sister","sisterhood","sisters","sit","situation","six","sixteen","sixth","sixty","size","skateboard","sketch","skies","skill","skin","skinny","skip","skipped","skipping","sky","sleep","sleeping","sleepy","slept","slid","slide","sliding","slight","slippery","sloth","slow","small","smell","smelly","smile","smiled","smiles","smiling","smooth","snack","snail","snake","snakes","snow","snowball","snowflake","snowstorm","so","soar","soccer","social","society","soft","softball","softness","software","soggy","soil","solar","soldier","solid","soluble","solution","solve","solved","solving","some","somebody","somehow","someone","something","sometimes","somewhere","song","songs","soon","sort","sorted","sorting","soul","sounds","soup","source","south","southeast","southwest","space","span","sparkling","speak","speaker","speaking","spear","special","species","specific","spectacular","speech","speechless","spelling","sphere","spider","spiders","spiky","spinach","spiral","spirit","splash","splashed","splashing","spoken","spooky","spring","sprint","square","squirrel","stable","stadium","stage","stand","standard","standing","star","starfish","starlight","stars","start","state","statement","station","stations","statistic","statue","stay","stayed","staying","steady","steak","steep","stem","stencil","stick","sticky","stillness","stingray","stomach","stone","stones","stood","stop","stopped","stopping","storeroom","stories","stork","storm","storms","stormy","story","storytelling","straight","strait","strange","strategy","strawberry","stream","street","streetlight","streets","strength","stretch","stretched","stretching","strict","stride","stroke","strong","structure","struggle","stubborn","stuck","student","study","stun","stupid","style","subject","submarine","substance","substantial","subtle","subtract","suburb","success","successful","suddenly","suffix","sugar","suggest","sum","summarise","summer","summers","summit","sun","Sunday","sunflower","sunlight","sunrise","suns","sunset","sunshine","super","superior","supermarket","supervise","support","supporting","surf","surface","surfboard","surprise","surprised","surprises","surroundings","survival","survive","surviving","suspicious","sustain","swamp","swamps","swan","sweet","swift","swim","swimmer","swimming","sword","swum","syllable","symbol","symmetry","synonym","system","systematic","table","tables","tablet","tackle","take","talk","talked","talking","tall","tame","target","task","taste","tasted","tasting","taught","taxi","teach","teacher","teachers","teaching","team","teammate","teamwork","technical","technique","technology","tell","temperature","ten","tennis","tense","tension","tenth","terminal","terrific","territory","terror","test","textbook","texture","than","thank","thankful","that","that's","the","theatre","their","them","theme","then","theory","there","therefore","there's","thesaurus","these","they","they'd","they'll","they're","they've","thick","thickness","thin","thing","things","think","thinker","third","thirteen","thirty","this","thong","thorough","those","though","thoughtful","thoughtfulness","thoughtless","thousand","thousandth","three","thrilled","thriving","through","throughout","throw","throwing","thrown","thumb","thunder","thunderstorm","Thursday","tide","tidy","tiger","tigers","tight","till","timber","time","timeline","timetable","timid","timing","tiny","tired","tissue","title","to","toast","today","toe","together","tolerance","tomato","tomorrow","tone","tongue","tonight","too","tooth","toothbrush","toothpaste","top","topic","torment","tornado","tortoise","total","toucan","touch","touched","touching","tournament","toward","towards","town","towns","toy","toys","trace","track","trade","tradition","traditional","traffic","tragedy","trail","train","trains","tram","transform","transforming","translate","translating","transparent","transport","trap","travel","travelled","travelling","treasure","treatment","treaty","tree","treehouse","trees","tremendous","trial","triangle","tribe","tributary","tricky","tried","trim","triumph","trouble","truck","trunk","trust","truthful","try","trying","tucker","Tuesday","tumble","tuna","tundra","tunnel","tunnels","turkey","turn","turned","turning","turtle","turtles","twelve","twenty","twist","two","typical","ugly","ultimate","umbrella","umbrellas","unable","uncle","unclear","uncomfortable","under","underground","underneath","understand","understanding","underwater","undo","unfair","unfriendly","unhappy","uniform","unique","unite","united","universal","universe","unless","unlike","until","unusual","unwell","up","update","updating","upload","upon","upper","upset","upstairs","urgent","us","use","useful","useless","username","usual","utilise","utter","vacation","valid","validate","validating","valley","valleys","valuable","value","van","vanilla","vapour","variable","various","vast","vegemite","vegetable","vehicle","venture","verb","verify","verifying","version","vertex","vertical","very","vet","via","vibrant","vibrate","vicious","victory","video","view","vigorous","village","villages","villain","vine","violent","violin","virtual","visible","vision","visit","visited","visiting","visitor","visual","visualise","vital","vitamin","vivid","vocabulary","voice","voices","volcano","volcanoes","volleyball","voltage","volume","volunteer","volunteering","vowel","vulnerable","vulture","wait","waited","waiting","wake","walk","walked","walking","wallaby","walrus","want","ward","warm","warn","warning","was","wash","washed","washing","wasn't","wasp","wasteful","watch","watching","water","watercolour","waterfall","watermelon","wave","waved","waves","waving","way","we","weakness","wealth","weapon","weasel","weather","weave","website","we'd","Wednesday","week","weekend","weekly","weeks","weight","welcome","welcoming","we'll","well","went","we're","were","weren't","west","wet","wetland","we've","whale","whales","wharf","what","whatever","what's","when","whenever","where","whereas","where's","wherever","which","whichever","while","whisper","whispered","whispering","white","who","whoever","whole","whom","who's","whose","why","wicked","widespread","width","wield","wiggle","wiggled","wild","wilderness","wildlife","will","willing","wind","windmill","window","winds","winner","winter","winters","wireless","wisdom","wise","wish","wished","with","within","without","witness","witty","wobbly","wolf","wolves","wombat","wonder","wondered","wonderful","wondering","won't","wood","woodpecker","words","work","worker","world","worlds","worldwide","worm","worms","worried","worthless","worthy","would","wouldn't","wretched","wrist","write","writer","writing","written","yak","yakka","year","years","yell","yelled","yelling","yellow","yes","yesterday","yet","yoghurt","you","you'd","you'll","your","you're","yourself","you've","zealous","zebra","zebras","zero","zone","zoom","age","ago","almost","alone","already","art","bad","bike","born","chance","cozy","easy","end","enough","ever","face","favourite","fell","few","fine","flag","food","front","fun","goodbye","goose","hat","hello","hen","life","mess","mom","more","music","need","other","pet","ready","same","secret","sorry","sound","still"];
+const WORD_SET = new Set(WORD_LIST.map(w => w.toLowerCase()));
+
+// Levenshtein distance for spell correction
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  if (m === 0) return n; if (n === 0) return m;
+  const dp = Array.from({length: m+1}, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1]
+        : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+    }
+  }
+  return dp[m][n];
+}
+
+function spellSuggestions(word) {
+  const w = word.toLowerCase().replace(/[^a-z\']/g, '');
+  if (!w || w.length < 2) return null;
+  if (WORD_SET.has(w)) return []; // correctly spelled
+
+  const d1 = [], d2 = [];
+  // Length window: candidates must be within 2 chars of the typed word
+  const maxLen = w.length + 2, minLen = Math.max(1, w.length - 2);
+
+  for (const cand of WORD_LIST) {
+    const cl = cand.toLowerCase();
+    if (cl.length < minLen || cl.length > maxLen) continue;
+    if (isBlocked(cl)) continue;
+
+    // Require first letter AND second letter (if both words are long enough) to match,
+    // OR allow first-letter-only match when words are very short (<=3 chars).
+    // This eliminates "shock" for "spok" (s≠sh at position 1) while keeping
+    // "spoke"/"spoken" (sp matches sp).
+    if (cl[0] !== w[0]) continue;
+    if (w.length >= 3 && cl.length >= 2 && cl[1] !== w[1]) continue;
+
+    const dist = levenshtein(w, cl);
+    if (dist === 1) d1.push({ word: cand, len: cl.length });
+    else if (dist === 2) d2.push({ word: cand, len: cl.length });
+    // No early break — scan full list so we don\'t miss words alphabetically far from prefix
+  }
+
+  // Sort each distance bucket: prefer words closest in length to the typed word
+  // (so "spoke" beats "spoken" for "spok" since it\'s only 1 char longer vs 2)
+  const byLenProximity = (a, b) => Math.abs(a.len - w.length) - Math.abs(b.len - w.length);
+  d1.sort(byLenProximity);
+  d2.sort(byLenProximity);
+
+  const results = [...d1, ...d2].slice(0, 5).map(r => r.word);
+  return results.length ? results : null;
+}
+
+// ── Editor ──
+const editor = document.getElementById('editor');
+const dropdown = document.getElementById('dropdown');
+let activeIdx = -1, curSugg = [], curPrefix = '', fetchTimer = null;
+let spellDDActive = false; // true while spell/alternatives DD is showing or loading
+let prevText = '', wordTypedChars = 0;
+let dropMode = 'suggest'; // 'suggest' or 'spell'
+
+function getCaretRect() {
+  const sel = getSelection(); if (!sel.rangeCount) return null;
+  const r = sel.getRangeAt(0).cloneRange(); r.collapse(true);
+  return r.getBoundingClientRect();
+}
+function getBeforeCaret() {
+  const sel = getSelection(); if (!sel.rangeCount) return '';
+  const r = sel.getRangeAt(0).cloneRange(); r.setStart(editor, 0);
+  return r.toString();
+}
+function lastWord(text) { const m = text.match(/[\w'']+$/); return m ? m[0] : ''; }
+
+// ── Completions (local word list) ──
+// Kids-frequency boost: words in the top portion of the list get a boost
+// Explicit high-frequency primary school word set — Dolch, Fry, and common curriculum words.
+// These get a large score boost so they always surface above less common words with the same prefix.
+const KIDS_SET = new Set([
+  "a","able","about","above","across","act","add","after","afternoon","again","age","ago",
+  "agree","air","all","almost","alone","along","already","also","always","am","an","and",
+  "angry","animal","answer","any","apple","are","arm","around","art","ask","at","ate","aunt",
+  "autumn","away","baby","back","bad","bag","ball","balloon","banana","band","barn","bat",
+  "bath","beach","bean","bear","beautiful","because","bed","been","before","begin","bell",
+  "best","big","bike","bird","birthday","bite","black","blow","blue","boat","body","bone",
+  "book","born","bottle","bounce","boy","brave","bread","break","bright","bring","broken",
+  "brother","brown","bubble","bug","build","bunny","bus","busy","but","butter","button","by",
+  "cage","cake","call","calm","came","can","candle","candy","careful","carry","cat","catch",
+  "cause","cave","chair","chance","change","chat","cheese","child","children","chocolate",
+  "choose","city","clap","class","clean","clever","climb","close","cloud","cold","collect",
+  "colour","come","comfort","cook","cool","copy","corner","count","country","cover","cozy",
+  "crab","crawl","crazy","create","cross","crown","cry","cup","cute","dance","danger","dark",
+  "day","dear","decide","deer","delicious","different","dig","dinner","dinosaur","do","dog",
+  "dolphin","done","door","down","dragon","draw","dream","dress","drink","drive","drop",
+  "drum","dry","duck","early","earth","easy","eat","egg","eight","either","elephant","end",
+  "enjoy","enough","even","evening","ever","every","everyone","everything","explore","eye",
+  "face","fall","family","farm","fast","father","favourite","feel","feet","fell","few","find",
+  "fine","first","fish","five","flag","flower","fly","follow","food","forest","forget","found",
+  "four","fox","friend","frog","from","front","fruit","full","fun","funny","game","garden",
+  "gentle","get","gift","girl","give","glad","go","good","goodbye","goose","got","grass",
+  "great","green","grow","guess","had","happy","hard","has","hat","hear","heart","hello",
+  "help","hen","here","hide","high","hill","him","his","hole","home","honey","hop","horse",
+  "hot","house","how","hug","hungry","hurt","idea","if","imagine","in","inside","interesting",
+  "into","is","it","jump","just","keep","kind","king","know","ladder","lamp","laugh","learn",
+  "leave","let","life","light","like","lion","little","live","long","look","loud","love",
+  "lucky","magic","make","many","map","me","meet","mess","milk","mirror","mom","monkey",
+  "moon","more","morning","mother","mountain","mouse","much","mud","music","my","name","need",
+  "nest","never","new","next","nice","night","nine","no","nose","not","now","of","off","old",
+  "on","once","one","only","open","or","other","our","out","over","own","paint","park","party",
+  "path","people","perfect","pet","pick","pig","play","please","pond","pretty","problem",
+  "puddle","purple","push","put","queen","question","quick","quiet","rabbit","rain","rainbow",
+  "reach","read","ready","red","remember","ride","right","river","road","rock","room","round",
+  "run","sad","safe","same","say","school","secret","see","she","shine","show","simple","sing",
+  "sister","sit","sky","sleep","slow","small","smell","smile","snow","so","soft","some","soon",
+  "sorry","sound","soup","special","spider","splash","spring","star","start","stay","stick",
+  "still","stone","stop","story","strong","summer","sun","surprise","sweet","swim","tall",
+  "teacher","tell","thank","that","the","then","there","they","think","three","throw","time",
+  "tiny","to","today","together","tomorrow","tonight","too","top","touch","town","toy","tree",
+  "try","turn","two","umbrella","uncle","under","up","us","use","very","visit","voice","walk",
+  "want","warm","was","watch","water","wave","we","well","went","were","what","when","where",
+  "whisper","white","who","why","wild","will","wind","wish","wolf","wonder","world","would",
+  "write","year","yellow","yes","you","your","zebra","zoom",
+  "can't","don't","didn't","doesn't","won't","wouldn't","couldn't","shouldn't","haven't",
+  "hasn't","hadn't","isn't","aren't","wasn't","weren't","I'm","I'll","I've","I'd","it's",
+  "he's","she's","they're","we're","you're","let's","that's","there's","here's","what's",
+  "where's","who's","how's","o'clock"
+]);
+
+function localSugg(prefix) {
+  const pl = prefix.toLowerCase();
+  return WORD_LIST
+    .filter(w => w.toLowerCase().startsWith(pl) && w.toLowerCase() !== pl && !isBlocked(w))
+    .map(w => ({ word: w, score: (KIDS_SET.has(w.toLowerCase()) ? 200000 : 5000) - (w.length - prefix.length) * 3000 }))
+    .sort((a,b) => b.score - a.score)
+    .slice(0, 5)
+    .map(d => d.word);
+}
+
+function fetchSugg(prefix) {
+  clearTimeout(fetchTimer);
+  if (!prefix || prefix.length < 1 || !assistOn()) { hideDD('fetchSugg-empty'); return; }
+  // Don't show typing suggestions while spell/alternatives DD is loading or showing
+  if (dropMode === 'spell') return;
+  fetchTimer = setTimeout(() => {
+    const words = localSugg(prefix);
+    if (words.length) showDD(words, prefix, 'suggest');
+    else hideDD('fetchSugg-no-results');
+  }, 80);
+}
+
+// ── Get word under mouse click ──
+function getWordAtPoint(x, y) {
+  // Cancel any pending spell pass — it could re-wrap words in spans
+  // and fragment text nodes between now and caretRangeFromPoint.
+  clearTimeout(spellTimer);
+
+  // If the click landed directly on a misspelled span, the whole span
+  // IS the word — use its full text content directly. This avoids the
+  // strip-then-detect race entirely for the common misspelled-word case.
+  const target = document.elementFromPoint(x, y);
+  if (target && target.classList && target.classList.contains('misspelled')) {
+    const word = target.textContent;
+    const beforeRange = document.createRange();
+    beforeRange.setStart(editor, 0);
+    beforeRange.setEnd(target, 0);
+    const textStart = beforeRange.toString().length;
+    const textEnd = textStart + word.length;
+    const wordRange = document.createRange();
+    wordRange.selectNode(target);
+    window.getSelection().removeAllRanges();
+    window.getSelection().addRange(wordRange);
+    return { word, textStart, textEnd };
+  }
+
+  // For non-span words: strip spans and normalize so the target word
+  // lives in a single unbroken text node.
+  editor.querySelectorAll('.misspelled').forEach(span => {
+    span.replaceWith(document.createTextNode(span.textContent));
+  });
+  editor.normalize();
+
+  let caretRange;
+  if (document.caretRangeFromPoint) {
+    caretRange = document.caretRangeFromPoint(x, y);
+  } else if (document.caretPositionFromPoint) {
+    const pos = document.caretPositionFromPoint(x, y);
+    if (!pos) return null;
+    caretRange = document.createRange();
+    caretRange.setStart(pos.offsetNode, pos.offset);
+    caretRange.collapse(true);
+  }
+  if (!caretRange || caretRange.startContainer.nodeType !== Node.TEXT_NODE) return null;
+
+  const node = caretRange.startContainer;
+  const text = node.textContent;
+  let start = caretRange.startOffset;
+  let end   = caretRange.startOffset;
+  const isWordChar = ch => /[\w'\u2019]/.test(ch);
+  while (start > 0 && isWordChar(text[start - 1])) start--;
+  while (end < text.length && isWordChar(text[end])) end++;
+  if (start === end) return null;
+
+  const word = text.slice(start, end);
+
+  // Calculate plain-text offset using the same toString() method that
+  // textContent uses — consistent between capture and replacement.
+  const beforeRange = document.createRange();
+  beforeRange.setStart(editor, 0);
+  beforeRange.setEnd(node, start);
+  const textStart = beforeRange.toString().length;
+  const textEnd = textStart + word.length;
+
+  // Highlight the word so user sees what will be replaced
+  const wordRange = document.createRange();
+  wordRange.setStart(node, start);
+  wordRange.setEnd(node, end);
+  window.getSelection().removeAllRanges();
+  window.getSelection().addRange(wordRange);
+
+  debugLog('detect "' + word + '" ts=' + textStart + ' te=' + textEnd + ' nodeText="' + text.slice(0,30) + '"');
+  return { word, textStart, textEnd };
+}
+
+function getSpellSuggestionsAsync(word, callback) {
+  const w = word.toLowerCase().replace(/[^a-z']/g, '');
+  if (!w || w.length < 2) { callback(null); return; }
+  // For correctly spelled words we still want alternatives —
+  // only exclude the word itself from suggestions, don't bail out early.
+  const isCorrect = WORD_SET.has(w);
+
+  // Local Levenshtein candidates up to distance 3
+  const localCands = [];
+  const maxLen = w.length + 3, minLen = Math.max(1, w.length - 3);
+  for (const cand of WORD_LIST) {
+    const cl = cand.toLowerCase();
+    if (cl.length < minLen || cl.length > maxLen) continue;
+    if (isBlocked(cl)) continue;
+    const dist = levenshtein(w, cl);
+    if (dist <= 3) localCands.push({ word: cand, dist });
+  }
+
+  // Datamuse phonetic query
+  fetch('https://api.datamuse.com/words?sp=' + encodeURIComponent(w) + '&max=15&md=fd')
+    .then(r => r.json())
+    .then(data => {
+      const seen = new Set();
+      const results = [];
+      // First-letter bonus: children typically get the first letter right,
+      // so suggestions starting with the same letter as the typed word
+      // should rank significantly higher than those that don't.
+      const firstLetter = w[0];
+      const firstLetterBonus = (cand) => cand[0] === firstLetter ? 800 : 0;
+
+      localCands.forEach(c => {
+        const cl = c.word.toLowerCase();
+        seen.add(cl);
+        results.push({ word: c.word, def: null,
+          score: 1000
+            + firstLetterBonus(cl)
+            + (KIDS_SET.has(cl) ? 500 : 0)
+            - c.dist * 200
+            - Math.abs(cl.length - w.length) * 30 });
+      });
+      data.forEach(d => {
+        const dl = d.word.toLowerCase();
+        if (isBlocked(dl)) return;
+        if ((d.score || 0) < MIN_VALID_SCORE) return;
+        if (seen.has(dl)) {
+          const ex = results.find(r => r.word.toLowerCase() === dl);
+          if (ex) ex.score += 300;
+          return;
+        }
+        seen.add(dl);
+        const dist = levenshtein(w, dl);
+        const defs = d.defs && d.defs.length ? d.defs : null;
+        results.push({ word: d.word, def: defs,
+          score: (WORD_SET.has(dl) ? 800 : 0)
+            + firstLetterBonus(dl)
+            + (KIDS_SET.has(dl) ? 500 : 0)
+            - dist * 200
+            - Math.abs(dl.length - w.length) * 30 });
+      });
+      results.sort((a, b) => b.score - a.score);
+      const final = results.filter(r => r.word.toLowerCase() !== w).slice(0, 5).map(r => ({ word: r.word, def: r.def }));
+      callback(final.length ? final : null);
+    })
+    .catch(() => {
+      // Datamuse unavailable — local only
+      localCands.sort((a, b) => a.dist - b.dist || Math.abs(a.word.length - w.length) - Math.abs(b.word.length - w.length));
+      const final = localCands.filter(c => c.word.toLowerCase() !== w).slice(0, 5).map(c => ({ word: c.word, def: null }));
+      callback(final.length ? final : null);
+    });
+}
+
+function speakDefinition(word, def, btn) {
+  // If we already have the definition stored from the Datamuse results, use it
+  if (def && def.length > 0) {
+    const first = def[0].replace(/^\w+\s+/, '');
+    speak(word + '. ' + first, btn);
+    return;
+  }
+  // Otherwise fetch on demand
+  const orig = btn.textContent;
+  btn.textContent = '…';
+  fetch('https://api.datamuse.com/words?sp=' + encodeURIComponent(word) + '&max=1&md=d')
+    .then(r => r.json())
+    .then(data => {
+      btn.textContent = orig;
+      if (data.length > 0
+          && data[0].word.toLowerCase() === word.toLowerCase()
+          && data[0].defs && data[0].defs.length > 0) {
+        const first = data[0].defs[0].replace(/^\w+\s+/, '');
+        speak(word + '. ' + first, btn);
+      } else {
+        // No definition in dictionary — just speak the word clearly
+        speak(word, btn);
+      }
+    })
+    .catch(() => {
+      btn.textContent = orig;
+      // Datamuse unavailable — just speak the word so the student still hears it
+      speak(word, btn);
+    });
+}
+
+function showSpellDD(wordInfo) {
+  const { word } = wordInfo;
+  dropMode = 'spell'; // set immediately so fetchSugg won't override
+  spellDDActive = true;
+  activeIdx = -1;
+
+  const inWordSet = WORD_SET.has(word.toLowerCase().replace(/[^a-z']/g, ''));
+
+  // Helper to build a suggestion item
+  function makeSuggItem(suggObj) {
+    // suggObj is either a string (legacy) or {word, def}
+    const sugg = typeof suggObj === 'string' ? suggObj : suggObj.word;
+    const def  = typeof suggObj === 'string' ? null     : suggObj.def;
+
+    const item = document.createElement('div');
+    item.className = 'drop-item';
+
+    // Left: speaker button
+    const sb = document.createElement('span');
+    sb.className = 'speak-dot'; sb.textContent = '🔊';
+    sb.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); speak(sugg, sb); recordListen(); });
+    sb.addEventListener('touchend',  e => { e.preventDefault(); e.stopPropagation(); speak(sugg, sb); recordListen(); });
+    sb.addEventListener('click',     e => { e.preventDefault(); e.stopPropagation(); });
+
+    // Middle: word label (flex-grow so it fills space between buttons)
+    const lbl = document.createElement('span');
+    lbl.textContent = sugg;
+    lbl.style.flex = '1';
+    if (WORD_SET.has(sugg.toLowerCase())) lbl.style.fontWeight = '600';
+
+    // Right: definition button
+    const db = document.createElement('span');
+    db.className = 'def-dot';
+    db.setAttribute('aria-label', 'Hear definition of ' + sugg);
+    db.textContent = '?';
+    db.addEventListener('mousedown', e => {
+      e.preventDefault(); e.stopPropagation();
+      speakDefinition(sugg, def, db);
+    });
+    db.addEventListener('touchend', e => {
+      e.preventDefault(); e.stopPropagation();
+      speakDefinition(sugg, def, db);
+    });
+    db.addEventListener('click', e => {
+      e.preventDefault(); e.stopPropagation();
+    });
+
+    item.appendChild(sb); item.appendChild(lbl); item.appendChild(db);
+
+    // Use both mousedown (desktop) and touchend (mobile).
+    // mousedown fires on desktop and prevents focus loss.
+    // touchend fires on mobile where mousedown may not fire.
+    // click fires as a fallback for both.
+    function doReplace(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      debugLog('doReplace fired: ' + e.type + ' sugg=' + sugg);
+      replaceWord(wordInfo, sugg);
+    }
+    item.addEventListener('mousedown', doReplace);
+    item.addEventListener('touchend', doReplace);
+    item.addEventListener('click', doReplace);
+    return item;
+  }
+
+  function showLoading(msg) {
+    dropdown.innerHTML = '';
+    const d = document.createElement('div');
+    d.className = 'drop-unknown';
+    d.textContent = msg;
+    dropdown.appendChild(d);
+    applyModeToDD(); posDD(null); dropdown.style.display = 'block';
+  }
+
+  function showResults(suggestions, headerText, unknownText) {
+    curSugg = suggestions || [];
+    dropdown.innerHTML = '';
+    const hdr = document.createElement('div');
+    if (!suggestions || suggestions.length === 0) {
+      hdr.className = 'drop-unknown';
+      hdr.textContent = unknownText;
+      dropdown.appendChild(hdr);
+    } else {
+      hdr.className = 'drop-header';
+      hdr.textContent = headerText;
+      dropdown.appendChild(hdr);
+      suggestions.forEach(s => dropdown.appendChild(makeSuggItem(s)));
+    }
+    applyModeToDD(); posDD(null); dropdown.style.display = 'block';
+  }
+
+  if (inWordSet || (!wordInfo.span)) {
+    // Correctly spelled word (or verified by Datamuse, or no span) —
+    // show alternatives so student can swap a correctly spelled but wrong word
+    showLoading('\u23f3 Finding alternatives for \u201c' + word + '\u201d\u2026');
+    getSpellSuggestionsAsync(word, suggestions => {
+      showResults(
+        suggestions,
+        '\uD83D\uDD0A Alternatives for \u201c' + word + '\u201d',
+        '\u2713 \u201c' + word + '\u201d \u2014 no alternatives found'
+      );
+    });
+  } else {
+    // Has a misspelled span — show corrections
+    showLoading('\u23f3 Checking \u201c' + word + '\u201d\u2026');
+    getSpellSuggestionsAsync(word, suggestions => {
+      showResults(
+        suggestions,
+        'Did you mean\u2026',
+        suggestions === null
+          ? '\u2753 \u201c' + word + '\u201d \u2014 not sure. Ask your teacher!'
+          : '\u2713 \u201c' + word + '\u201d looks correct!'
+      );
+    });
+  }
+}
+
+function replaceWord(wordInfo, replacement) {
+  debugLog('replaceWord: word="' + wordInfo.word + '" span=' + !!(wordInfo.span && wordInfo.span.parentNode) + ' textStart=' + wordInfo.textStart + ' replacement="' + replacement + '"');
+  editor.focus();
+
+  if (wordInfo.span && wordInfo.span.parentNode) {
+    // Misspelled span path — replace the whole span element
+    const span = wordInfo.span;
+    const nextSib = span.nextSibling;
+    const hasSpaceAfter = nextSib && nextSib.nodeType === Node.TEXT_NODE
+                          && nextSib.textContent[0] === ' ';
+    const sel = window.getSelection();
+    const r = document.createRange();
+    r.selectNode(span);
+    sel.removeAllRanges();
+    sel.addRange(r);
+    document.execCommand('insertText', false, hasSpaceAfter ? replacement : replacement + ' ');
+
+  } else if (wordInfo.textStart !== undefined) {
+    // Strip spans and normalize so innerText is clean plain text
+    editor.querySelectorAll('.misspelled').forEach(span => {
+      span.replaceWith(document.createTextNode(span.textContent));
+    });
+    editor.normalize();
+
+    // Use textContent — same method used when capturing the offsets,
+    // so positions are consistent. innerText differs due to <br> handling.
+    const fullText = editor.textContent;
+    const ts = wordInfo.textStart;
+    const te = wordInfo.textEnd;
+
+    // Verify the offsets still point to the expected word
+    const currentWord = fullText.slice(ts, te);
+    debugLog('replace "' + wordInfo.word + '" ts=' + ts + ' te=' + te + ' found="' + currentWord + '" textLen=' + fullText.length);
+    if (currentWord.toLowerCase() !== wordInfo.word.toLowerCase()) {
+      // Text changed since click — find the word by searching near the click area
+      const searchFrom = Math.max(0, ts - 20);
+      const searchIn = fullText.slice(searchFrom, te + 20).toLowerCase();
+      const idx = searchIn.indexOf(wordInfo.word.toLowerCase());
+      if (idx < 0) return;
+      wordInfo.textStart = searchFrom + idx;
+      wordInfo.textEnd = wordInfo.textStart + wordInfo.word.length;
+    }
+
+    // Use textContent (same as toString() used when capturing offsets),
+    // not innerText which can differ due to <br> and block element handling.
+    const fullTC = editor.textContent;
+    const ts2 = wordInfo.textStart;
+    const te2 = wordInfo.textEnd;
+    const before = fullTC.slice(0, ts2);
+    const after  = fullTC.slice(te2);
+    // Never add or remove spaces — keep exactly what was there.
+    // The only exception: if the word is at the end of the text with
+    // nothing after it, add a trailing space so the cursor is in the right place.
+    const needSpace = after.length === 0;
+    const newText = before + replacement + (needSpace ? ' ' : '') + after;
+    const caretPos = before.length + replacement.length;
+
+    // Write back via textContent and restore caret
+    editor.textContent = newText;
+    editor.normalize();
+    restoreCaretOffset(editor, caretPos);
+
+  } else {
+    return;
+  }
+  logWord(replacement, 'corrected');
+  recordCorrection();
+  recordActivity();
+  hideDD('replaceWord'); speak(replacement);
+  if (assistOn()) scheduleSpellPass();
+}
+
+// ── Dropdown display ──
+function applyModeToDD() {
+  const m = MODES[currentMode];
+  if (!m) return;
+  const isDark = m.dropBg === '#000000' || m.dropBg.startsWith('#0') || m.dropBg.startsWith('#07');
+  dropdown.style.background = m.dropBg; dropdown.style.borderColor = isDark ? '#444' : '#d0d0d0';
+  dropdown.style.color = m.dropColor;
+  dropdown.querySelectorAll('.drop-item').forEach(el => { el.style.color = m.dropColor; });
+  dropdown.querySelectorAll('.remain-part').forEach(el => { el.style.color = isDark ? 'rgba(255,255,255,0.5)' : '#999'; });
+}
+
+function showDD(words, prefix, mode) {
+  curSugg = words; curPrefix = prefix; activeIdx = -1; dropMode = mode || 'suggest';
+  const frag = document.createDocumentFragment();
+  words.forEach(word => {
+    const item = document.createElement('div');
+    item.className = 'drop-item'; item.setAttribute('role', 'option');
+    const sb = document.createElement('span');
+    sb.className = 'speak-dot'; sb.setAttribute('aria-label', 'Hear ' + word); sb.textContent = '🔊';
+    sb.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); speak(word, sb); recordListen(); });
+    const lbl = document.createElement('span');
+    lbl.style.flex = '1';
+    lbl.innerHTML = '<span class="typed-part">' + escHtml(word.slice(0, prefix.length)) + '</span>'
+                  + '<span class="remain-part">' + escHtml(word.slice(prefix.length)) + '</span>';
+    const db = document.createElement('span');
+    db.className = 'def-dot'; db.textContent = '?';
+    db.setAttribute('aria-label', 'Hear definition of ' + word);
+    db.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); speakDefinition(word, null, db); });
+    item.appendChild(sb); item.appendChild(lbl); item.appendChild(db);
+    item.addEventListener('mousedown', e => {
+      if (e.target === item || e.target === lbl || e.target.parentElement === lbl) {
+        e.preventDefault(); insertWord(word, 'suggestion');
+      }
+    });
+    frag.appendChild(item);
+  });
+  dropdown.innerHTML = ''; dropdown.appendChild(frag);
+  applyModeToDD();
+  posDD(null);
+  dropdown.style.display = 'block';
+}
+
+function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function posDD(clickEvent) {
+  let top, left;
+  if (clickEvent) {
+    top = clickEvent.clientY + 8; left = clickEvent.clientX;
+  } else {
+    const cr = getCaretRect();
+    if (!cr || (cr.width === 0 && cr.height === 0)) { hideDD('posDD-no-caret'); return; }
+    top = cr.bottom + 4; left = cr.left;
+  }
+  dropdown.style.top = top + 'px'; dropdown.style.left = left + 'px';
+  dropdown.style.display = 'block';
+  requestAnimationFrame(() => {
+    const dr = dropdown.getBoundingClientRect(); const vw = window.innerWidth;
+    if (dr.right > vw - 8) dropdown.style.left = Math.max(8, left - (dr.right - vw) - 8) + 'px';
+    if (dr.bottom > window.innerHeight - 8) dropdown.style.top = Math.max(8, top - dr.height - 12) + 'px';
+  });
+}
+
+function hideDD(reason) {
+  debugLog('hideDD: ' + (reason||'unknown'));
+  dropdown.style.display = 'none';
+  activeIdx = -1;
+  dropMode = 'suggest';
+  spellDDActive = false;
+  // Cancel speech only when user explicitly dismisses (clicks away or selects)
+  // not for internal/programmatic closes during spell pass etc.
+  const cancelReasons = ['doc-mousedown', 'replaceWord', 'insertWord', 'escape', 'editor-click-space'];
+  if (cancelReasons.includes(reason)) speechSynthesis.cancel();
+}
+function setActive(i) { dropdown.querySelectorAll('.drop-item').forEach((el,j) => el.classList.toggle('active', j===i)); activeIdx = i; }
+
+function insertWord(word, how) {
+  editor.focus();
+  const sel = getSelection(); if (!sel.rangeCount) return;
+  const range = sel.getRangeAt(0);
+  const before = getBeforeCaret();
+  const m = before.match(/[\w'']+$/); if (!m) return;
+  const node = range.startContainer, off = range.startOffset;
+  if (node.nodeType === Node.TEXT_NODE) {
+    const start = Math.max(0, off - m[0].length);
+    const nr = document.createRange(); nr.setStart(node, start); nr.setEnd(node, off); nr.deleteContents();
+    const tn = document.createTextNode(word + ' '); nr.insertNode(tn);
+    const cur = document.createRange(); cur.setStartAfter(tn); cur.collapse(true);
+    sel.removeAllRanges(); sel.addRange(cur);
+  }
+  logWord(word, how); wordTypedChars = 0; prevText = getBeforeCaret();
+  if (how === 'suggestion') recordSuggestion();
+  hideDD('insertWord'); speak(word); recordActivity();
+  if (assistOn()) scheduleSpellPass();
+}
+
+// ── Click handler: clicking any word shows suggestions/alternatives ──
+editor.addEventListener('click', e => {
+  if (!assistOn()) { hideDD('no-assist'); return; }
+
+  // Set spell mode immediately to block fetchSugg from overriding
+  spellDDActive = true;
+  clearTimeout(fetchTimer);
+
+  // Clicked directly on a misspelled span
+  const target = e.target;
+  if (target.classList && target.classList.contains('misspelled')) {
+    const info = { word: target.textContent, span: target };
+    showSpellDD(info);
+    return;
+  }
+
+  // Clicked on any other word — detect it and show alternatives
+  const info = getWordAtPoint(e.clientX, e.clientY);
+  if (info && info.word.length >= 2) {
+    showSpellDD(info);
+    return;
+  }
+
+  // Clicked on whitespace/punctuation — cancel spell mode, show typing suggestions
+  spellDDActive = false;
+  hideDD('editor-click-space');
+  const w = lastWord(getBeforeCaret());
+  if (w) fetchSugg(w);
+});
+
+editor.addEventListener('input', () => {
+  recordActivity();
+  const text = getBeforeCaret();
+  if (prevText && (text.endsWith(' ') || text.endsWith('\n'))) {
+    const w = lastWord(prevText);
+    if (w) { const last = sess.log[sess.log.length-1]; if (!last || last.word !== w) { logWord(w, 'typed'); wordTypedChars = 0; } }
+  } else { wordTypedChars = lastWord(text).length; }
+  prevText = text;
+  fetchSugg(lastWord(text));
+  if (assistOn()) scheduleSpellPass();
+});
+
+editor.addEventListener('keydown', e => {
+  const items = dropdown.querySelectorAll('.drop-item');
+  const vis = dropdown.style.display === 'block';
+  if (vis && items.length) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive(Math.min(activeIdx+1, items.length-1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(Math.max(activeIdx-1, 0)); }
+    else if (e.key === 'Enter' && activeIdx >= 0) {
+      e.preventDefault();
+      if (dropMode === 'spell') { /* handled by mousedown */ }
+      else insertWord(curSugg[activeIdx], 'suggestion');
+    }
+    else if (e.key === 'Tab') { e.preventDefault(); if (curSugg.length && dropMode === 'suggest') insertWord(curSugg[0], 'suggestion'); }
+    else if (e.key === 'Escape') hideDD('escape');
+  } else if (e.key === 'Tab') e.preventDefault();
+});
+
+document.addEventListener('mousedown', e => { const inDD = dropdown.contains(e.target);
+  debugLog('doc-mousedown: inDD=' + inDD + ' target=' + e.target.className + ' ddDisplay=' + dropdown.style.display);
+  if (!inDD && e.target !== editor) hideDD('doc-mousedown'); });
+window.addEventListener('scroll', () => { if (dropdown.style.display === 'block') posDD(null); }, true);
+window.addEventListener('resize', () => hideDD('resize'));
+
+// ── Controls ──
+function speakAll() { const t = editor.innerText.trim(); if (t) speak(t); }
+
+function clearAll() {
+  if (!confirm('Start a new session? This will clear the writing and reset all stats.')) return;
+  editor.innerHTML = '';
+  sess.log = []; sess.spellCount = 0; sess.events = [];
+  verifiedWords.clear(); rejectedWords.clear(); pendingWords.clear();
+  sess.start = null; clearInterval(sess.timer); sess.timer = null;
+  sess.writingSecs = 0; sess.activeStart = null; sess.lastActivity = null;
+  clearTimeout(sess.idleTimer); sess.idleTimer = null;
+  prevText = ''; wordTypedChars = 0;
+  document.getElementById('log-body').innerHTML = '<tr><td colspan="4" style="color:#bbb;padding:10px">Words will appear here as you type…</td></tr>';
+  greeted = false;
+  document.getElementById('sname').value = ''; onNameInput(); refreshStats(); hideDD('clearAll');
+  document.getElementById('sname').focus();
+}
+
+function calcInsightStats() {
+  const txt = editor.innerText.trim();
+  const allWords = txt ? txt.toLowerCase().split(/\s+/).filter(w => /[a-z]/.test(w)) : [];
+  const uniqueWords = new Set(allWords);
+  const ttr = allWords.length >= 5 ? (uniqueWords.size / allWords.length).toFixed(2) : null;
+  const wSecs = getWritingSecs();
+  const wpm = (wSecs > 0 && allWords.length > 0) ? Math.round(allWords.length / (wSecs / 60)) : null;
+  const CONNECTIVES = new Set(['and','but','or','so','yet','for','nor','because','although','though',
+    'even','while','whereas','unless','until','since','after','before','when','if','that','which',
+    'however','therefore','furthermore','meanwhile','nevertheless','consequently','additionally',
+    'moreover','otherwise','instead','finally','firstly','secondly','also','then','next','suddenly',
+    'eventually','later','earlier','besides','despite','except']);
+  const connCount = allWords.filter(w => CONNECTIVES.has(w)).length;
+  return { ttr, wpm, connCount };
+}
+
+function buildReportText() {
+  const name = document.getElementById('sname').value.trim() || 'Unknown';
+
+  const txt = editor.innerText.trim();
+  const wc = txt ? txt.split(/\s+/).filter(Boolean).length : 0;
+  const sugg = sess.log.filter(e => e.how === 'suggestion').length;
+  const spell = sess.log.filter(e => e.how === 'corrected').length;
+  const typed = sess.log.filter(e => e.how === 'typed').length;
+  const rate = sess.log.length > 0 ? Math.round((sugg+spell)/sess.log.length*100) + '%' : '0%';
+  const date = new Date().toLocaleDateString('en-AU', {day:'2-digit',month:'short',year:'numeric'});
+  let out = '=== WORD HELPER SESSION REPORT ===\n';
+  out += 'Student: ' + name + '   |   Date: ' + date + '\n';
+  out += '\n--- WRITING ---\n\n'; out += txt + '\n';
+  out += '\n--- SESSION STATS ---\n\n';
+  const wSecs = getWritingSecs();
+  const tSecs = getTotalSecs();
+  const wm = Math.floor(wSecs/60), ws = wSecs%60;
+  const tm = Math.floor(tSecs/60), ts2 = tSecs%60;
+  const pct2 = tSecs > 0 ? Math.round(wSecs/tSecs*100) : 0;
+  out += 'Total time:         ' + tm + 'm ' + String(ts2).padStart(2,'0') + 's\n';
+  out += 'Time writing:       ' + wm + 'm ' + String(ws).padStart(2,'0') + 's  (' + pct2 + '% of total)\n';
+  out += 'Total words:        ' + wc + '\n';
+  out += 'From suggestions:   ' + sugg + '\n';
+  out += 'From spell corrections: ' + spell + '\n';
+  out += 'Typed manually:     ' + typed + '\n';
+  out += 'Assistance rate:    ' + rate + '\n';
+  const ins = calcInsightStats();
+  out += 'Vocab variety (TTR):    ' + (ins.ttr !== null ? ins.ttr : '—') + '\n';
+  out += 'Words per minute:       ' + (ins.wpm !== null ? ins.wpm : '—') + '\n';
+  out += 'Connectives used:       ' + ins.connCount + '\n';
+  out += '\n--- WORD LOG ---\n\n';
+  out += '#    Word                How entered      Time (s)\n';
+  out += '---  ------------------  ---------------  ---------\n';
+  sess.log.forEach((e, i) => {
+    out += String(i+1).padEnd(4) + ' ' + e.word.padEnd(20) + ' ' + e.how.padEnd(16) + ' ' + e.t + 's\n';
+  });
+  return out;
+}
+
+function doCopy(text, msg) {
+  navigator.clipboard.writeText(text).then(() => showToast(msg)).catch(() => {
+    const ta = document.createElement('textarea'); ta.value = text;
+    ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta);
+    ta.focus(); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+    showToast(msg);
+  });
+}
+function copyText() { const t = editor.innerText.trim(); if (!t) { showToast('Nothing to copy yet!'); return; } doCopy(t, '\u2705 Writing copied — paste with Ctrl+V / Cmd+V'); }
+function copyTextAndReport() { const t = editor.innerText.trim(); if (!t) { showToast('Nothing to copy yet!'); return; } doCopy(buildReportText(), '\u2705 Text + report copied — paste with Ctrl+V / Cmd+V'); }
+
+function showToast(msg) {
+  const t = document.getElementById('toast'); t.textContent = msg; t.style.display = 'block';
+  clearTimeout(t._timer); t._timer = setTimeout(() => { t.style.display = 'none'; }, 3500);
+}
+
+// ── Session timeline graph ──
+// Colour palette
+const GCOL = {
+  writing:    '#2ECC71',  // green  — active writing
+  idle:       '#ECF0F1',  // light grey — idle
+  listen:     '#F39C12',  // amber  — listening to a word spoken
+  suggestion: '#3498DB',  // blue   — suggestion selected
+  correction: '#E74C3C',  // red    — spell correction selected
+  bg:         '#FFFFFF',
+  text:       '#2C3E50',
+  subtext:    '#7F8C8D',
+  border:     '#BDC3C7',
+};
+
+function drawGraph() {
+  const canvas = document.getElementById('session-canvas');
+  if (!canvas) return;
+
+  // Determine canvas pixel dimensions
+  const W = canvas.offsetWidth || 640;
+  const SCALE = window.devicePixelRatio || 1;
+  const HEADER_H = 90;   // student name + date + legend
+  const BAR_H    = 40;   // main timeline bar height
+  const STATS_H  = 54;   // key stats row below bar
+  const PAD      = 18;
+  const H        = HEADER_H + BAR_H + STATS_H + PAD * 2;
+
+  canvas.width  = W * SCALE;
+  canvas.height = H * SCALE;
+  canvas.style.height = H + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(SCALE, SCALE);
+
+  // Background
+  ctx.fillStyle = GCOL.bg;
+  ctx.fillRect(0, 0, W, H);
+
+  const tTotal = getTotalSecs();
+  const name = document.getElementById('sname').value.trim() || 'Student';
+  const date = new Date().toLocaleDateString('en-AU', {day:'2-digit',month:'short',year:'numeric'});
+
+  // ── Header ──
+  ctx.fillStyle = GCOL.text;
+  ctx.font = `bold ${14 * SCALE / SCALE}px Arial`;
+  ctx.fillText('Word Helper — Session Report', PAD, PAD + 14);
+  ctx.fillStyle = GCOL.subtext;
+  ctx.font = `${12 * SCALE / SCALE}px Arial`;
+  ctx.fillText(name + '   |   ' + date, PAD, PAD + 32);
+
+  // Legend
+  const legendItems = [
+    { col: GCOL.writing,    label: 'Writing' },
+    { col: GCOL.idle,       label: 'Idle',      border: GCOL.border },
+    { col: GCOL.listen,     label: 'Listening' },
+    { col: GCOL.suggestion, label: 'Suggestion' },
+    { col: GCOL.correction, label: 'Correction' },
+  ];
+  let lx = PAD;
+  const ly = PAD + 52;
+  legendItems.forEach(item => {
+    ctx.fillStyle = item.col;
+    ctx.fillRect(lx, ly - 9, 12, 12);
+    if (item.border) { ctx.strokeStyle = item.border; ctx.lineWidth = 1; ctx.strokeRect(lx, ly - 9, 12, 12); }
+    ctx.fillStyle = GCOL.subtext;
+    ctx.font = '11px Arial';
+    ctx.fillText(item.label, lx + 16, ly);
+    lx += ctx.measureText(item.label).width + 36;
+  });
+
+  // ── Timeline bar ──
+  const barX = PAD;
+  const barY = HEADER_H;
+  const barW = W - PAD * 2;
+
+  // Background (idle)
+  ctx.fillStyle = GCOL.idle;
+  ctx.strokeStyle = GCOL.border;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(barX, barY, barW, BAR_H, 6);
+  ctx.fill();
+  ctx.stroke();
+
+  if (tTotal > 0) {
+    // Draw writing periods from events
+    let currentWriteStart = null;
+    const events = [...sess.events];
+    // If currently writing, add a synthetic write_end at now
+    if (sess.activeStart) events.push({ type: 'write_end', t: tSec() });
+
+    events.forEach(ev => {
+      const x = barX + (ev.t / tTotal) * barW;
+      if (ev.type === 'write_start') {
+        currentWriteStart = x;
+      } else if (ev.type === 'write_end' && currentWriteStart !== null) {
+        const segW = Math.max(2, x - currentWriteStart);
+        ctx.fillStyle = GCOL.writing;
+        ctx.beginPath();
+        ctx.roundRect(currentWriteStart, barY, segW, BAR_H, 3);
+        ctx.fill();
+        currentWriteStart = null;
+      }
+    });
+
+    // Draw event markers on top of bar
+    events.forEach(ev => {
+      if (ev.type === 'listen' || ev.type === 'suggestion' || ev.type === 'correction') {
+        const x = barX + (ev.t / tTotal) * barW;
+        const col = ev.type === 'listen' ? GCOL.listen
+                  : ev.type === 'suggestion' ? GCOL.suggestion
+                  : GCOL.correction;
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.arc(x, barY + BAR_H / 2, 5, 0, Math.PI * 2);
+        ctx.fill();
+        // White ring
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+    });
+
+    // Time labels on bar
+    ctx.fillStyle = GCOL.subtext;
+    ctx.font = '10px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText('0:00', barX, barY + BAR_H + 12);
+    const endLabel = Math.floor(tTotal/60) + ':' + String(tTotal%60).padStart(2,'0');
+    ctx.textAlign = 'right';
+    ctx.fillText(endLabel, barX + barW, barY + BAR_H + 12);
+    ctx.textAlign = 'left';
+  }
+
+  // ── Key stats row ──
+  const rawText = editor.innerText.trim();
+  const allWords = rawText ? rawText.toLowerCase().split(/\s+/).filter(w => /[a-z]/.test(w)) : [];
+  const uniqueW = new Set(allWords);
+  const ttr = allWords.length >= 5 ? (uniqueW.size / allWords.length).toFixed(2) : '—';
+  const wSecs = getWritingSecs();
+  const wpm = (wSecs > 0 && allWords.length > 0) ? Math.round(allWords.length / (wSecs / 60)) : '—';
+  const wPct = tTotal > 0 ? Math.round(getWritingSecs() / tTotal * 100) + '%' : '—';
+
+  const statsY = HEADER_H + BAR_H + PAD + 16;
+  const colW = barW / 3;
+  const statItems = [
+    { label: 'Vocab variety (TTR)', val: String(ttr) },
+    { label: 'Words per minute',    val: String(wpm) },
+    { label: 'Writing %',           val: wPct },
+  ];
+  statItems.forEach((item, i) => {
+    const sx = PAD + i * colW + colW / 2;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = GCOL.text;
+    ctx.font = 'bold 16px Arial';
+    ctx.fillText(item.val, sx, statsY);
+    ctx.fillStyle = GCOL.subtext;
+    ctx.font = '10px Arial';
+    ctx.fillText(item.label, sx, statsY + 16);
+  });
+  ctx.textAlign = 'left';
+
+  // Border around whole canvas
+  ctx.strokeStyle = GCOL.border;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, 0.5, W - 1, H - 1);
+}
+
+function downloadGraph() {
+  const canvas = document.getElementById('session-canvas');
+  if (!canvas) return;
+  drawGraph(); // ensure fresh render at full res
+  const name = document.getElementById('sname').value.trim() || 'student';
+  const date = new Date().toLocaleDateString('en-AU', {day:'2-digit',month:'short',year:'numeric'}).replace(/\s/g,'-');
+  canvas.toBlob(blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name.replace(/\s+/g,'-') + '-session-graph-' + date + '.png';
+    a.click();
+    URL.revokeObjectURL(url);
+  }, 'image/png');
+}
+
+function downloadCSV() {
+  const name = document.getElementById('sname').value.trim() || 'Unknown';
+
+  const txt = editor.innerText.trim();
+  const wc = txt ? txt.split(/\s+/).filter(Boolean).length : 0;
+  const sugg = sess.log.filter(e => e.how === 'suggestion').length;
+  const spell = sess.log.filter(e => e.how === 'corrected').length;
+  const typed = sess.log.filter(e => e.how === 'typed').length;
+  const rate = sess.log.length > 0 ? Math.round((sugg+spell)/sess.log.length*100) + '%' : '0%';
+  const date = new Date().toLocaleDateString('en-AU', {day:'2-digit',month:'short',year:'numeric'});
+  let csv = 'WORD HELPER — SESSION REPORT\n\n';
+  csv += 'Student,' + name + '\n'; csv += 'Date,' + date + '\n';
+  csv += '\nFINAL WRITING\n'; csv += '"' + txt.replace(/"/g,'""') + '"\n';
+  csv += '\nSESSION STATS\n';
+  const wSecsC = getWritingSecs();
+  const tSecsC = getTotalSecs();
+  const pctC = tSecsC > 0 ? Math.round(wSecsC/tSecsC*100) : 0;
+  csv += 'Total session time,' + Math.floor(tSecsC/60) + 'm ' + String(tSecsC%60).padStart(2,'0') + 's\n';
+  csv += 'Time writing,' + Math.floor(wSecsC/60) + 'm ' + String(wSecsC%60).padStart(2,'0') + 's\n';
+  csv += 'Writing percentage,' + pctC + '%\n';
+  csv += 'Total words written,' + wc + '\n';
+  csv += 'Words from suggestions,' + sugg + '\n';
+  csv += 'From spell corrections,' + spell + '\n';
+  csv += 'Words typed manually,' + typed + '\n';
+  csv += 'Assistance rate,' + rate + '\n';
+  const insC = calcInsightStats();
+  csv += 'Vocab variety (TTR),' + (insC.ttr !== null ? insC.ttr : '') + '\n';
+  csv += 'Words per minute,' + (insC.wpm !== null ? insC.wpm : '') + '\n';
+  csv += 'Connectives used,' + insC.connCount + '\n';
+  csv += '\nWORD-BY-WORD LOG\n'; csv += '#,Word,How entered,Time into session (sec)\n';
+  sess.log.forEach((e,i) => { csv += (i+1) + ',"' + e.word + '",' + e.how + ',' + e.t + '\n'; });
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url;
+  a.download = (name.replace(/\s+/g,'-')||'student') + '-word-helper-' + date.replace(/\s/g,'-') + '.csv';
+  a.click(); URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>
