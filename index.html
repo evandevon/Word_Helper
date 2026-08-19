@@ -76,6 +76,19 @@ input[type=text]:focus{border-color:#1D9E75;box-shadow:0 0 0 2px rgba(93,202,165
 .tag-l{color:#9B59B6}
 .tag-d{color:#E67E22}
 .tag-c{color:#185FA5;font-weight:600}
+.tag-v{color:#C2185B;font-weight:600}
+/* Dictation row: fixed height always, so nothing ever resizes or shifts
+   the layout below it — the mic button never changes its label (only
+   colour/pulse), and the caption box is a fixed-size scroller. */
+#dictation-row{display:flex;gap:8px;align-items:center;margin-bottom:0.6rem}
+#mic-btn{flex-shrink:0}
+#mic-btn.listening{background:#e74c3c;color:#fff;border-color:#c0392b;animation:mic-pulse 1.2s ease-in-out infinite}
+#mic-btn.unsupported{display:none}
+@keyframes mic-pulse{0%,100%{box-shadow:0 0 0 0 rgba(231,76,60,0.45)}50%{box-shadow:0 0 0 8px rgba(231,76,60,0)}}
+#dictation-status{flex:1;min-width:0;height:36px;display:flex;align-items:center;padding:0 12px;border-radius:8px;border:1px solid #f0dbe6;background:#fdf5f9;color:#8E0E42;font-size:13px}
+#dictation-status-text{overflow-x:auto;white-space:nowrap;width:100%;scrollbar-width:none}
+#dictation-status-text::-webkit-scrollbar{display:none}
+#dictation-status-text:empty::before{content:"Hold the mic button and start talking…";color:#c79ab0}
 #toast{display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a1a1a;color:#fff;font-size:13px;padding:10px 20px;border-radius:24px;z-index:9999;white-space:nowrap}
 #hint{font-size:12px;color:#bbb;margin-top:6px}
 #debug-wrap{margin-top:10px;border-radius:8px;overflow:hidden;border:1px solid #ddd}
@@ -114,6 +127,11 @@ input[type=text]:focus{border-color:#1D9E75;box-shadow:0 0 0 2px rgba(93,202,165
       Suggestions &amp; spell check
     </label>
   </div>
+  <div id="dictation-row">
+    <button class="btn btn-green" id="mic-btn" type="button" aria-pressed="false"
+            title="Hold down to talk, release to stop" aria-label="Hold to talk — speech to text">&#127908; Hold to talk</button>
+    <div id="dictation-status" role="status" aria-live="polite"><span id="dictation-status-text"></span></div>
+  </div>
   <div id="name-msg" style="font-size:13px;color:#993C1D;margin-bottom:0.4rem;display:block">
     &#8679; Please type your name before you start writing.
   </div>
@@ -148,6 +166,7 @@ input[type=text]:focus{border-color:#1D9E75;box-shadow:0 0 0 2px rgba(93,202,165
         <div class="stat-card"><div class="stat-label">Words written</div><div class="stat-val" id="s-words">0</div></div>
         <div class="stat-card"><div class="stat-label">From suggestions</div><div class="stat-val" id="s-sugg">0</div></div>
         <div class="stat-card"><div class="stat-label">From spell corrections</div><div class="stat-val" id="s-spell">0</div></div>
+        <div class="stat-card"><div class="stat-label">By voice</div><div class="stat-val" id="s-voice">0</div></div>
         <div class="stat-card"><div class="stat-label">Typed manually</div><div class="stat-val" id="s-typed">0</div></div>
         <div class="stat-card"><div class="stat-label">Assistance rate</div><div class="stat-val" id="s-rate">&mdash;</div></div>
       </div>
@@ -513,79 +532,122 @@ const pendingWords = new Set();
 // but above archaic/obscure variants that aren't children's spelling.
 const MIN_VALID_SCORE = 3000;
 
+// Datamuse's `score` field is an internal relevance rank for the sp=
+// (sounds-like) query — it reflects edit-closeness to the typed string,
+// NOT real-world word frequency. A very common word (e.g. "eating") can
+// still land far down the phonetic-closeness ranking and score below
+// MIN_VALID_SCORE. So anywhere we'd otherwise reject on score alone, we
+// also accept words whose real usage frequency (the md=f `f:` tag, uses
+// per million words) clears this floor — genuinely common words should
+// never be discarded just because Datamuse ranked them "not close enough".
+const MIN_VALID_FREQ = 3;
+
+// Rough heuristic for the classic "double the final consonant before a
+// vowel suffix" spelling rule (run -> running, stop -> stopped, but
+// begin -> beginning too — it applies beyond one-syllable words). If a
+// root ends consonant-vowel-consonant (and doesn't end in w/x/y, which
+// never double), a following "-ing"/"-ed"/"-er"/"-est" often needs the
+// doubled consonant. We can't reliably resolve this from spelling alone
+// (it really depends on syllable stress), so we don't try — we just use
+// it below to avoid treating an un-doubled form as automatically valid.
+function endsInCVC(w) {
+  if (w.length < 3) return false;
+  const vowels = 'aeiou';
+  const a = w[w.length - 3], b = w[w.length - 2], c = w[w.length - 1];
+  return !vowels.includes(a) && vowels.includes(b) && !vowels.includes(c) && !'wxy'.includes(c);
+}
+
+// Strip common inflectional suffixes off a word, returning a candidate root
+// to check against our known-word list. Used only as an offline fallback
+// (see below) so a word like "testing" — not itself in our compact
+// ~4,000-word list, but plainly just "test" + "-ing" — isn't mistaken for
+// a misspelling of some unrelated word purely because it's one letter away
+// from it (e.g. "tasting").
+//
+// "Bare" strips (drop the suffix with nothing added back, e.g.
+// testing -> test) are the ones vulnerable to the doubling-rule ambiguity
+// above — begining -> begin would otherwise wrongly validate a genuine
+// misspelling of "beginning" — so those are rejected when the root ends
+// in that consonant-vowel-consonant pattern, and left for the ordinary
+// edit-distance check below to catch instead.
+function stripInflection(w) {
+  const safe = [];  // not affected by consonant doubling
+  const bare = [];  // is affected — needs the endsInCVC guard
+
+  if (/ies$/.test(w)) safe.push(w.replace(/ies$/, 'y'));   // studies -> study
+  if (/ied$/.test(w)) safe.push(w.replace(/ied$/, 'y'));   // studied -> study
+  if (/ing$/.test(w)) {
+    bare.push(w.replace(/ing$/, ''));                       // testing -> test
+    safe.push(w.replace(/ing$/, 'e'));                      // hoping -> hope
+  }
+  if (/ed$/.test(w)) {
+    bare.push(w.replace(/ed$/, ''));                        // tested -> test
+    safe.push(w.replace(/ed$/, 'e'));                       // hoped -> hope
+  }
+  if (/es$/.test(w)) safe.push(w.replace(/es$/, ''));      // boxes -> box
+  if (/s$/.test(w)) safe.push(w.replace(/s$/, ''));        // tests -> test
+  if (/er$/.test(w)) bare.push(w.replace(/er$/, ''));      // tester -> test
+  if (/est$/.test(w)) bare.push(w.replace(/est$/, ''));    // fastest -> fast
+
+  const safeHit = safe.find(c => c.length >= 2 && WORD_SET.has(c));
+  if (safeHit) return safeHit;
+  return bare.find(c => c.length >= 2 && WORD_SET.has(c) && !endsInCVC(c)) || null;
+}
+
 function verifyWordWithDatamuse(word) {
   if (pendingWords.has(word)) return;
   pendingWords.add(word);
 
-  // Single query strategy — ask Datamuse for the word's own frequency score.
-  // We request the word itself via sp= (exact spelling match) with md=f
-  // (frequency metadata). If Datamuse returns the word with a score above
-  // our threshold, it's a real, common-enough word.
+  // Ask Datamuse for words spelled/sounding like this one — no wildcard.
+  // A wildcard prefix search (sp=word*) pulls in unrelated LONGER words and
+  // multi-word phrases that just happen to start with the same letters,
+  // and those routinely outrank the real word itself: "jelly*" topped with
+  // the phrase "jelly roll", and "lived*" topped with the obscure medical
+  // term "livedoid" — both beat the actual word on Datamuse's internal
+  // rank score, which used to make this code wrongly reject them as
+  // misspelled (it required the word to be the literal #1 result). Dropping
+  // the wildcard restricts results to genuine close-spelling neighbors.
   //
-  // Crucially we search for the word in ALL results (max=5), not just the
-  // top one — this handles cases where Datamuse returns multi-word variants
-  // (e.g. "every body") as the top result before "everybody", which would
-  // cause a top-result check to wrongly reject a valid word.
-  //
-  // For genuinely misspelled words like "begining", Datamuse returns
-  // "beginning" as the only high-scoring result, so "begining" won't
-  // appear in the results at all, correctly marking it as misspelled.
-
-  // Use TWO endpoints in parallel:
-  // A) sp=word* (prefix wildcard) — returns the word if it exists as an exact
-  //    dictionary entry, since real words always rank highest for their own prefix.
-  //    "happi" won't rank highly here; "happy" will.
-  // B) w=word (exact word frequency lookup) — returns ONLY if the exact word
-  //    exists in Datamuse's dictionary with a frequency score.
-  //    This is the definitive check: "happi" returns nothing; "everybody" returns itself.
-  //
-  // A word is valid if EITHER:
-  //   - It appears in A with score >= MIN_VALID_SCORE AND is the exact word, OR
-  //   - It appears in B with any score (existence confirmed)
-  //
-  // Using both gives redundancy — B is the strict check, A adds score gating.
-
-  // Strategy: fetch up to 5 prefix results and apply two tests:
-  //
-  // Test 1 — the word must be the TOP result (most frequent match for its
-  //   own prefix). Misspellings like "happi" lose to "happiness".
-  //
-  // Test 2 — no other result in the list should score more than 3x higher
-  //   than the word itself. "begining" tops its own prefix search but
-  //   "beginning" scores ~5x more, exposing it as a misspelling.
-  //   Real words like "everybody" have no dramatically higher-scoring rival.
-  //
-  // Both tests must pass for the word to be considered valid.
-  fetch('https://api.datamuse.com/words?sp=' + encodeURIComponent(word) + '*&max=5&md=f')
+  // Validity is judged by real-world usage frequency (md=f), not rank
+  // score: the word must appear in the results, and its own frequency
+  // must not be massively dwarfed by a much more common near-spelling.
+  // That gap is the actual signature of a typo — "begining" appears at
+  // 0.1 uses/million while "beginning" sits at 92/million (~900x more
+  // common). Two unrelated real words of different everyday-ness never
+  // differ anywhere near that much (e.g. "lived" 64/million vs "live"
+  // 101/million; "jelly" 2.2/million vs "belly" 6.3/million).
+  fetch('https://api.datamuse.com/words?sp=' + encodeURIComponent(word) + '&max=10&md=f')
     .then(r => r.json())
     .then(data => {
       pendingWords.delete(word);
       const wl = word.toLowerCase();
-      const topResult = data[0];
 
-      // Test 1: must be the top result
-      const isTop = topResult && topResult.word.toLowerCase() === wl;
+      function freqOf(entry) {
+        if (!entry || !entry.tags) return 0;
+        const tag = entry.tags.find(t => t.startsWith('f:'));
+        return tag ? (parseFloat(tag.slice(2)) || 0) : 0;
+      }
 
-      const wordScore = topResult ? (topResult.score || 1) : 1;
+      const self = data.find(d => d.word.toLowerCase() === wl);
+      const exists = !!self;
+      const selfFreq = freqOf(self);
       const others = data.filter(d => d.word.toLowerCase() !== wl);
-      const maxOtherScore = others.reduce((max, d) => Math.max(max, d.score || 0), 0);
+      const topRival = others.reduce((best, d) => (freqOf(d) > freqOf(best) ? d : best), null);
+      const maxOtherFreq = freqOf(topRival);
 
-      // Test 2a: no rival scores more than 3x higher (catches "happi" vs "happiness")
-      const noDominantRival = maxOtherScore < wordScore * 3;
+      // Not dominated: a rival can be more common (real words vary in
+      // everyday-ness) as long as it's not >20x more common — that gap
+      // consistently separates "different real word" from "typo of a
+      // much more common one" in practice.
+      const notDominated = maxOtherFreq === 0 || selfFreq * 20 >= maxOtherFreq;
+      // Absolute floor — mainly guards the case where the word has no
+      // rivals to compare against at all.
+      const minFreq = others.length === 0 ? 1 : 0.05;
+      const passesA = exists && notDominated && selfFreq >= minFreq;
 
-      // Test 2b: require a minimum absolute score in all cases.
-      // "elefant" scores 3, "begining" scores 2003 — real children's words
-      // score much higher. Minimum of 500 filters obvious non-words while
-      // allowing less common but real words like "everybody"(1027) through.
-      const passesMinScore = wordScore >= 500;
-
-      // Test 2c: if no rivals at all, require higher score (5000).
-      // A real word that is the only result for its prefix should be common.
-      const noRivals = others.length === 0;
-      const passesNoRivalScore = !noRivals || wordScore >= 5000;
-
-      const passesA = isTop && noDominantRival && passesMinScore && passesNoRivalScore;
-      debugLog('verify "' + word + '" | top: ' + (topResult ? topResult.word + '(' + topResult.score + ')' : 'none') + ' | rival: ' + maxOtherScore + ' | ratio: ' + (maxOtherScore/wordScore).toFixed(1) + 'x' + (noRivals ? ' | NO RIVALS (min:5000)' : '') + ' | ' + (passesA ? 'VALID' : 'FLAGGED'));
+      debugLog('verify "' + word + '" | freq: ' + selfFreq.toFixed(3) + '/million | top rival: ' +
+        (topRival ? topRival.word + '(' + maxOtherFreq.toFixed(3) + ')' : 'none') + ' | ' +
+        (passesA ? 'VALID' : 'FLAGGED'));
       if (passesA) {
         verifiedWords.add(word);
       } else {
@@ -595,10 +657,28 @@ function verifyWordWithDatamuse(word) {
     })
     .catch(() => {
       pendingWords.delete(word);
-      // Datamuse unavailable — use local Levenshtein as fallback.
-      // If the word is within distance 1 of a known word, it's likely
-      // a misspelling. If no close match exists, give benefit of the doubt.
+      // Datamuse unavailable (offline, blocked by a network/firewall, API
+      // down, etc.) — use local heuristics as fallback.
       const wl = word.toLowerCase();
+
+      // First: is this just a common inflection (-ing/-ed/-s/-er/-est/...)
+      // of a word we already know is real? Our curated list is only ~4,000
+      // words and doesn't carry every conjugated form of every entry (e.g.
+      // it has "test" but not "testing"/"tested"/"tests") — without this
+      // check, a word like "testing" falls through to the edit-distance
+      // check below, where it happens to be exactly one letter away from
+      // the unrelated real word "tasting" and gets wrongly flagged.
+      const root = stripInflection(wl);
+      if (root && WORD_SET.has(root)) {
+        debugLog('verify "' + word + '" | OFFLINE fallback | inflection of known word "' + root + '" | VALID');
+        verifiedWords.add(word);
+        runSpellPass(true);
+        return;
+      }
+
+      // Otherwise: if the word is within edit distance 1 of a known word,
+      // it's likely a misspelling. If no close match exists, give benefit
+      // of the doubt.
       // A word is likely a misspelling if a known word exists within
       // edit distance 1 AND is the same length or longer (not just a
       // shorter root — "tells" is not a misspelling of "tell").
@@ -618,9 +698,37 @@ function verifyWordWithDatamuse(word) {
     });
 }
 
+// Common phonetic/text-speak spellings that happen to coincide with an
+// obscure-but-real dictionary entry, which Datamuse's frequency check can't
+// reliably tell apart from a legitimate rare word purely by how often it
+// appears in a general text corpus: "sed" is the Latin conjunction "but"
+// (2.97 uses/million), "wat" is a Thai Buddhist temple (1.28/million), "da"
+// is Irish/Scottish dialect for "dad" (17.7/million) — and that last one is
+// actually MORE frequent than a totally ordinary word like "hi"
+// (15.5/million), so no frequency cutoff can cleanly separate them. Since
+// correcting exactly this kind of phonetic spelling is the whole point of
+// a literacy tool, we flag these explicitly rather than leaving it to
+// Datamuse.
+const TEXTSPEAK_MISSPELLINGS = new Set([
+  'da', 'dis', 'dat', 'dem', 'dey', 'dere', 'deez',
+  'wat', 'wot', 'wut', 'wen',
+  'sed', 'sez',
+]);
+
 function isLikelyMisspelled(word) {
   const clean = word.toLowerCase().replace(/^[\'-]+|[\'-]+$/g, '');
-  if (clean.length < 2) return false;
+  if (!clean) return false;
+  if (clean.length === 1) {
+    // "a" and "I" are the only real single-letter English words. Every
+    // other lone letter ("r", "u", "b", "c", "y"...) is almost always
+    // texting shorthand (are, you, be, see, why) rather than a genuine
+    // word — and Datamuse is the wrong tool to tell the difference, since
+    // single letters reliably show up in its corpus with real frequency
+    // for their own reasons (e.g. "y" the chromosome/variable, "k" for
+    // "okay") that have nothing to do with what a child meant.
+    return clean !== 'a' && clean !== 'i';
+  }
+  if (TEXTSPEAK_MISSPELLINGS.has(clean)) return true; // known phonetic/text-speak — always underline
   if (WORD_SET.has(clean)) return false;          // in our curated list — fine
   if (verifiedWords.has(clean)) return false;     // confirmed real by Datamuse — fine
   if (rejectedWords.has(clean)) return true;      // confirmed bad by Datamuse — underline
@@ -871,11 +979,13 @@ function refreshStats() {
   const sugg = sess.log.filter(e => e.how === 'suggestion').length;
   const spell = sess.log.filter(e => e.how === 'corrected').length;
   const typed = sess.log.filter(e => e.how === 'typed').length;
+  const voice = sess.log.filter(e => e.how === 'dictated').length;
   document.getElementById('s-sugg').textContent = sugg;
   document.getElementById('s-spell').textContent = spell;
+  document.getElementById('s-voice').textContent = voice;
   document.getElementById('s-typed').textContent = typed;
   const total = sess.log.length;
-  document.getElementById('s-rate').textContent = total > 0 ? Math.round((sugg+spell)/total*100) + '%' : '—';
+  document.getElementById('s-rate').textContent = total > 0 ? Math.round((sugg+spell+voice)/total*100) + '%' : '—';
   // ── TTR, WPM, connectives ──
   const rawText = editor.innerText.trim();
   const allWords = rawText ? rawText.toLowerCase().split(/\s+/).filter(w => /[a-z]/.test(w)) : [];
@@ -903,10 +1013,10 @@ function logWord(word, how, fromWord) {
   if (sess.log.length === 1) tbody.innerHTML = '';
   const idx = sess.log.length;
   const tr = document.createElement('tr');
-  const tagClass = how === 'suggestion' ? 'tag-s' : how === 'corrected' ? 'tag-c' : how === 'pasted' ? 'tag-p' : how === 'listened' ? 'tag-l' : how === 'defined' ? 'tag-d' : 'tag-t';
-  const tagLabel = how === 'suggestion' ? '⬆ suggestion' : how === 'corrected' ? '✓ spell fix' : how === 'pasted' ? '📋 pasted' : how === 'listened' ? '🔊 listened' : how === 'defined' ? '❓ definition' : '⌨ typed';
+  const tagClass = how === 'suggestion' ? 'tag-s' : how === 'corrected' ? 'tag-c' : how === 'pasted' ? 'tag-p' : how === 'listened' ? 'tag-l' : how === 'defined' ? 'tag-d' : how === 'dictated' ? 'tag-v' : 'tag-t';
+  const tagLabel = how === 'suggestion' ? '⬆ suggestion' : how === 'corrected' ? '✓ spell fix' : how === 'pasted' ? '📋 pasted' : how === 'listened' ? '🔊 listened' : how === 'defined' ? '❓ definition' : how === 'dictated' ? '🎤 dictated' : '⌨ typed';
   // "Typed" col: what they started with
-  const typedDisplay = (fromWord && fromWord !== word) ? fromWord : (how === 'typed' || how === 'pasted' || how === 'listened' || how === 'defined') ? word : '—';
+  const typedDisplay = (fromWord && fromWord !== word) ? fromWord : (how === 'typed' || how === 'pasted' || how === 'listened' || how === 'defined' || how === 'dictated') ? word : '—';
   // "Final word" col: what ended up in the document
   tr.innerHTML = '<td style="text-align:right;padding:5px 8px">' + idx + '</td>'
     + '<td style="color:#888">' + typedDisplay + '</td>'
@@ -979,7 +1089,7 @@ function isBlocked(word) {
 }
 
 
-const WORD_LIST = ["a","abandon","abide","abilities","ability","able","abnormal","abolish","about","above","absence","absorb","absorbing","abstract","abundant","abuse","academic","accelerate","accent","accept","accepting","access","accessing","accident","accidents","accommodate","accomplish","accomplishment","account","accumulate","accurate","ache","achieve","achievement","achieving","aching","acid","acknowledge","across","act","acted","acting","action","actions","activate","active","activity","actor","actress","actual","actually","acute","adapt","add","added","adding","addition","additional","address","addresses","adequate","adjust","admire","adopt","adorable","adore","adult","advance","advanced","advantage","adventure","adventures","adventurous","advertise","advertisement","advice","advise","affect","afford","affordable","afraid","Africa","after","afternoon","afternoons","again","against","aggressive","agree","agreement","ahead","aim","air","airfield","airport","alarm","album","alert","alerting","algebra","algorithm","alike","alive","all","alliance","alligator","allocate","allow","allowance","allowed","allowing","almighty","along","alphabet","also","alter","although","altogether","always","am","amazed","amazing","ambitious","ambulance","America","among","amongst","amount","amusing","an","analyse","ancestor","anchor","ancient","and","angle","angry","animal","animals","anniversary","announce","announcement","answer","answered","answering","answers","ant","Antarctica","anxiety","anxious","any","anyone","anything","anyway","anywhere","apart","apologise","apostrophe","app","apparently","appeal","appealing","appear","apple","apples","apply","applying","appointment","appreciate","approach","appropriate","approval","approve","approximate","approximately","April","archipelago","architect","Arctic","are","area","aren't","argue","argument","arguments","arm","around","arrange","arrangement","arranging","arrive","arrived","arriving","arrowroot","article","artificial","artist","artists","arvo","as","ashamed","Asia","aside","ask","asked","asking","assemble","assist","assume","astronaut","at","ate","athlete","athletes","Atlantic","atmosphere","atoll","atom","attach","attack","attempt","attempts","attend","attending","attention","attitude","attract","attractive","audience","August","aunt","Australia","author","authorise","automatic","autumn","available","average","avocado","avoid","avoiding","award","aware","awareness","away","awesome","awful","awkward","axe","axis","babies","baby","back","backbone","background","backyard","bacon","bacteria","badly","badminton","bag","bake","baked","baker","baking","balance","balanced","balancing","ball","ballet","balloon","balloons","ballpark","balls","ban","banana","bananas","band","bang","banged","banging","banning","bare","bargain","bark","barked","barking","barn","barricade","barrier","base","basement","basic","basin","basis","basketball","bat","bath","bathe","bathed","bathing","bathroom","battery","battle","bay","be","beach","beaches","bean","beans","bear","bears","beat","beautiful","beauty","beaver","because","becomes","bed","bedroom","bedrooms","bee","been","bees","beetle","beetles","before","began","begin","beginning","behave","behind","belief","believe","believed","believing","bell","bells","belong","belonged","belonging","below","beneath","beneficial","benefit","berries","berry","beside","besides","best","bestseller","better","between","beyond","bicycle","big","bill","billabong","billowing","biography","bird","birds","birthday","biscuit","biscuits","bite","bitten","bitter","black","blade","blame","blank","blanket","blankets","blast","blaze","blazing","blend","blending","bless","blessing","blew","blink","block","blocking","bloom","blossom","blossoms","blow","blowing","blue","blueprint","boast","boat","boats","body","boiling","bold","bone","bones","book","bookcase","bookmark","books","bookshelf","boomerang","border","bored","boring","borrowing","both","bother","bottle","bottles","bottom","boulders","bounce","bounced","bouncing","bound","boundary","bouquet","bowl","box","boxes","boy","boys","brain","branch","branches","brave","bravery","bread","break","breakfast","breaking","breath","breathe","breathless","breeze","brekkie","brew","brewery","bricks","bridge","bridges","brief","briefing","briefly","bright","brightness","brilliant","bring","broad","broccoli","broken","brolly","brother","brotherhood","brown","browsing","bruise","brush","bubble","bubbles","buffet","bug","bugs","build","builder","building","built","bumpy","bunch","bundle","bunny","burden","burn","burned","burning","bus","buses","bushfire","busy","but","butter","butterflies","butterfly","button","buttons","buy","buzzing","by","cabinet","cable","cactus","cage","cages","cake","cakes","calculate","calculating","calendar","call","called","calling","calm","came","camel","camera","campaign","camper","campfire","campus","can","canal","cancel","cancelling","candle","candles","candy","cannot","can't","canteen","canvas","canyon","capable","capacity","cape","capital","captain","caption","capture","car","caravan","carbon","cards","care","career","careful","careless","carelessness","caretaker","cargo","carried","carrot","carry","carrying","cars","cart","carton","cartoon","castle","cat","catch","catching","categorise","caterpillar","caught","cause","caused","causing","cautious","cave","caves","cease","ceiling","celebrate","celebrated","celebrating","celebration","cell","census","centimetre","century","cereal","certain","chair","chairs","challenge","challenging","champion","change","changed","changing","channel","chapel","chapter","character","characters","charge","charitable","chart","chase","chased","chasing","chat","check","checked","checking","cheek","cheer","cheerful","cheerfulness","cheese","cheetah","chef","chemical","chest","chew","chewed","chewing","chicken","child","childhood","children","chilly","chimney","chimpanzee","chin","chips","chlorophyll","chocolate","choice","chook","choose","choosing","chord","chorus","chose","chubby","circle","circumference","circus","citizen","city","civilian","claim","claimant","clap","clapped","clapping","clarify","clash","class","classify","classifying","classroom","clause","clay","clean","cleaned","cleaning","clearing","clever","cleverness","click","cliff","climate","climb","climbed","climbing","close","closed","closet","closing","cloud","clouds","cloudy","club","clubhouse","clue","clueless","clumsy","coach","coast","coat","cobra","cockroach","coconut","code","cognitive","coincide","cold","collaborate","collaborating","collage","collapse","collect","collected","collecting","collection","collide","colour","coloured","colourful","colours","column","combative","combine","combining","come","comfort","comfortable","comma","command","commanding","comment","commission","committee","commodity","communicate","community","compact","compare","comparing","compass","compassionate","compete","competing","compile","complaint","complete","completing","complex","compose","compost","compound","comprehensive","compress","computer","computers","concentrate","concentrating","concern","concerned","conclusion","condense","condition","cone","confidence","confident","confirm","confirming","conflict","confuse","confused","confusing","connect","consider","considering","consistent","consonant","constant","construct","constructing","consult","contain","content","contest","continent","continue","contraction","contrary","contrast","contribute","contribution","control","controlling","conventional","conversation","convince","convincing","cook","cookbook","cooked","cookie","cooking","cool","cooperate","cooperating","coordinate","cope","copper","copy","core","corn","corner","correct","costume","cottage","could","couldn't","council","counsel","count","counted","counting","countless","countries","country","countryside","courage","courageous","cousin","cover","covered","cow","cowardly","crab","craft","crane","crash","crawl","crawled","crawling","crazy","cream","create","created","creating","creation","creative","creature","creatures","creepy","crest","crew","cricket","cried","crime","crisis","crispy","critical","criticise","criticising","criticism","crocodile","cross","crowd","crowded","crown","crucial","crumble","cry","crying","crystal","cube","cucumber","cultural","culture","cunning","cup","cupboard","cups","curious","current","curriculum","curtain","curved","cushion","customise","customising","cut","cute","cycle","cyclone","cylinder","dad","daily","damage","damaging","damp","dance","danced","dancer","dances","dancing","danger","dangerous","dangers","daring","dark","darkness","data","daughter","dawn","day","daydream","daylight","days","daytime","dazzle","dazzling","deadline","deal","dear","debate","debating","decade","decay","December","decent","decide","decided","deciding","decimal","decision","decisions","decorating","decoration","decoy","decrease","dedicate","dedicating","deep","deeply","deer","defeat","defend","define","defining","definition","degree","delay","delaying","delete","delicate","delicious","delight","delighted","deliver","delta","demand","demanding","democracy","demonstrate","demonstrating","denominator","dense","dentist","depend","depict","depth","describe","described","describing","desert","design","designing","desire","desperate","despite","destination","destroy","detail","detailed","detective","determine","determined","determining","develop","developing","development","device","devote","devour","devout","diagonal","diagram","dialogue","diamond","dictionary","did","didn't","differ","difference","different","differing","difficult","dig","digest","digging","digit","digital","dimension","dingo","dinner","dinners","dinosaur","dinosaurs","direct","direction","dirt","dirty","disagree","disappear","disappointed","discard","discover","discovered","discovering","discovery","discuss","disgrace","disguise","disgusted","dishonest","dislike","dismiss","disorder","displace","display","displaying","dispute","dissolve","distance","distress","distribute","distributing","district","distrust","diverse","divide","division","dizzy","do","doctor","doctors","document","dodge","does","doesn't","dog","dogs","doll","dolphin","dolphins","dominant","dominate","dominating","done","don't","door","doorbell","doors","doorstep","doorway","double","doubling","doubt","dough","down","downfall","download","downstairs","downtown","dozen","drag","dragon","dragonfly","dragons","drama","dramatic","draw","drawer","drawing","drawings","drawn","dread","dream","dreamed","dreamer","dreaming","dreams","drench","dress","dressed","dressing","dribble","dried","drink","drive","driver","driveway","drop","dropped","dropping","drum","drums","dry","drying","duck","ducks","dug","dull","dunno","duplicate","durable","during","dusk","dusty","duty","dynamic","eager","eagle","eagles","ear","early","earn","earnest","earth","earthquake","earthworm","east","eat","eclipse","ecosystem","editorial","effect","effective","efficient","effort","egg","eggs","eight","eighteen","eighth","eighty","either","elaborate","elbow","election","electricity","elegant","element","elephant","elephants","eleven","eliminate","eliminating","elsewhere","email","embarrassed","embryo","emerald","emergency","emotion","emotional","emphasise","emphasising","employ","empty","enable","enabling","encourage","encouraging","ending","endless","endure","enemy","energetic","energy","enforce","engine","engineer","engines","enhance","enjoy","enjoyed","enjoying","enormous","entire","entrance","environment","environmental","equal","equation","equator","equipment","erosion","error","eruption","escape","esky","essay","essential","establish","establishing","estimate","estuary","ethical","eucalyptus","Europe","evaluate","evaluating","evaporate","even","evening","event","events","eventual","eventually","every","everyone","everything","everywhere","evidence","evident","evil","evoke","evolution","evolve","exact","examine","examining","example","examples","excellent","except","exception","exceptional","exchange","excited","exciting","exclamation","exclude","excluding","exclusive","excuse","execute","executing","executive","exercise","exhaust","exhausted","exhibit","exhibition","exist","exit","expand","expect","expedition","experience","experiencing","experiment","experimenting","explain","explanation","explicit","explode","explore","explored","explorer","exploring","express","expressing","expression","extend","extended","external","extra","extreme","eye","eyes","fable","faces","fact","factor","factory","fail","failing","failure","faint","fair","fairground","faithful","falcon","fall","fallen","falling","falter","fame","familiar","families","family","famous","fancy","fantastic","fantasy","far","farm","farmer","farmers","farmyard","fast","father","fault","fearful","fearless","feather","feature","featuring","February","feedback","feel","feeling","feelings","feet","felt","fern","ferry","fertilise","festival","fiction","field","fields","fierce","fifteen","fifth","fifty","fight","fighter","figurative","figure","file","fill","filled","filling","filter","filthy","final","finally","find","finger","fingers","finish","fire","firefighter","fires","firework","firm","first","fish","fitness","five","fix","fixed","flame","flames","flamingo","flashlight","flat","flavour","flee","flexible","flight","float","floated","flood","floor","flour","flourish","flow","flower","flowers","fluffy","fluster","flute","fly","flying","focus","focusing","folder","follow","followed","following","foolish","foot","football","footpath","footprint","footy","for","forbid","force","forehead","foreign","forest","forests","forever","forget","forgive","forgotten","formal","formula","formulate","formulating","forty","forward","fossil","fought","found","foundation","four","fourteen","fourth","fox","fraction","fragile","frail","frame","free","freedom","freeze","frenzy","frequent","fresh","friction","Friday","fridge","friend","friendly","friends","friendship","frightened","frightening","frog","frogs","from","frost","frosty","frown","frozen","frugal","fruit","fruits","frustrated","full","fulltime","function","fundamental","fungus","funny","furious","furniture","furthermore","fury","future","galah","galaxy","gallery","game","games","garage","garden","gardens","garlic","gas","gateway","gather","gathering","gave","gaze","gecko","gem","general","generate","generating","generation","generous","genius","gentle","genuine","geometry","germinate","gesture","get","giant","gift","gifts","gigabyte","gigantic","giggle","giggled","giggling","giraffe","girl","girls","give","given","giving","glacier","glad","gleam","glitch","global","gloom","gloomy","glorious","glory","glossary","glossy","glove","glow","glue","gnaw","go","goal","goals","goat","goes","going","gold","goldfish","golf","good","goodness","gorge","gorgeous","gorilla","got","govern","governing","government","grab","grabbed","grabbing","graceful","gracious","gradual","grammar","grandchild","grandeur","grandfather","grandma","grandmother","grandpa","grant","grape","grapes","graph","graphic","grass","grasses","grassland","grateful","gravity","great","greedy","green","greet","grey","grief","grin","ground","grounds","group","grow","growing","growl","grown","grownup","growth","grumpy","guard","guardian","guess","guessed","guessing","guide","guilt","gulf","gum","gymnasium","habit","habitat","had","hadn't","hair","half","hammer","hamster","hand","handbag","handball","handle","hands","handshake","hang","happen","happened","happening","happiness","happy","harbour","hard","hardship","harm","harmful","harmless","harmony","harsh","harvest","has","hasn't","haunted","have","haven't","he","head","headline","headphone","headquarters","healthy","hear","heard","hearing","heart","hearts","heavy","he'd","hedgehog","heel","height","helicopter","he'll","helmet","help","helper","helpful","helpless","hemisphere","her","here","here's","heritage","hero","hers","he's","hexagon","hidden","hide","hiding","high","highland","highlight","highlighting","highway","hilarious","hill","hills","him","hip","hippopotamus","his","hockey","hold","hole","hollow","home","homeless","homes","homework","homophone","honest","honey","honeybee","honour","hop","hopeful","hopeless","hopped","hopping","horizon","horizontal","horrible","horrified","horror","horse","horseback","horses","hot","hotel","hour","house","household","houses","how","however","how's","hug","huge","hugged","hugging","humble","humorous","hundred","hundredth","hungry","hunt","hunted","hunter","hunting","hurdle","hurricane","hurried","hurry","hurrying","hurt","hypothesis","i","I","ice","icy","I'd","idea","ideal","ideas","identical","identify","identity","idiom","idiotic","if","ignore","I'll","illustrate","illustrating","I'm","imagination","imagine","imagined","imagining","immediate","immediately","immense","impact","implement","implementing","impolite","important","impossible","impress","impression","improve","improvement","improving","in","inch","include","incorrect","increase","incredible","indeed","independence","independent","index","indicate","indicating","individual","indoor","inference","inferior","influence","inform","informal","information","ingredient","inherit","initial","injury","innocent","innovative","insect","insects","inside","insist","inspect","inspire","inspiring","install","instead","instinct","instruct","instructing","instruction","instrument","insulate","integer","intellectual","intelligent","intend","intense","interactive","interest","interesting","internal","internet","interpret","interpretation","interpreting","interview","into","introduce","introduction","invention","inventor","investigate","investigating","investigation","invisible","invitation","invite","invited","involve","is","island","islands","isn't","isolate","issue","it","itchy","item","it's","its","itself","I've","jacket","jagged","jaguar","jam","January","jar","jars","jaw","jawbone","jealous","jetty","jogging","joint","jolly","journal","journey","journeys","joyful","judge","juice","juicy","July","jump","jumped","jumping","jumpy","June","jungle","jungles","just","justify","justifying","kangaroo","kayak","keep","keeper","keyboard","kick","kicked","kicking","kilogram","kilometre","kind","kindness","king","kingdom","kings","kiss","kissed","kitchen","kitten","kittens","kitty","knee","knock","knocked","knocking","know","knowledge","koala","kookaburra","label","lacrosse","ladder","ladders","ladybug","lagoon","lair","lake","lakes","lamp","lamps","land","landed","landing","lands","landscape","lane","language","large","larrikin","last","latitude","laugh","laughed","laughing","launch","launching","lava","layer","lazy","leader","leadership","leaf","lean","leap","learn","learned","learning","leave","leaves","left","leg","legend","lemon","length","leopard","let","let's","letter","letters","lettuce","librarian","libraries","library","lifelong","lifestyle","lift","lifted","lifting","light","lighthouse","lightning","lights","like","likelihood","likewise","limitation","limited","link","lion","lions","lip","liquid","listen","listened","listening","literacy","literature","litre","little","live","livelihood","lively","lizard","lizards","load","loaf","lobster","locate","location","logical","login","lonely","long","longitude","look","loosen","lose","loss","lost","loud","love","loved","lovely","loving","lowland","loyal","luck","lucky","lunch","lunchbox","lunchtime","ma'am","machinery","made","magazine","magic","magical","magnet","magnetic","magnificent","magpie","mailbox","main","mainstream","maintain","maintaining","major","make","maker","mammal","man","manage","managing","manatee","mango","manipulate","manipulating","manner","manual","many","map","marathon","march","March","marched","marching","mark","market","marsh","martial","marvel","mass","massive","match","mate","material","matter","mature","May","may","me","meadow","mean","meaning","meanwhile","measure","meat","median","medicine","Mediterranean","meerkat","meet","meeting","melancholy","melody","melon","melt","melted","melting","membership","memorise","memorising","memory","men","mental","mention","merit","message","messy","metaphor","meteor","method","metre","mice","microphone","microscope","middle","midnight","midpoint","mighty","milk","millimetre","mind","mine","mineral","miniature","minimal","minus","minute","miracle","mirror","miserable","mislead","misplace","misread","mission","mist","mistake","misuse","mix","mixture","mobile","mode","model","moderate","modify","moisture","molecule","moment","Monday","money","monitor","monitoring","monkey","monkeys","month","monthly","monument","moon","moonlight","moons","moose","moral","moreover","morning","mosaic","moss","mostly","moth","mother","mothers","motif","motion","motivate","motivating","motive","motorway","mount","mountain","mountains","mouse","move","moved","moving","mozzarella","much","mud","muddy","multiple","multiply","mum","mural","muscle","museum","mushroom","musical","musician","must","mustn't","mutual","my","myself","mysteries","mysterious","mystery","myth","nail","name","names","narrative","narrator","narrow","nasty","nation","national","natural","nature","naughty","navigate","navigating","near","nearby","neat","necessary","neck","negative","negotiate","negotiating","neighbour","neighbourhood","nervous","nest","nests","netball","network","neutral","never","nevertheless","new","next","nice","night","nightmare","nights","nighttime","nine","nineteen","ninety","ninth","no","noble","nobody","noisy","nonfiction","noodle","normal","north","northeast","northwest","nose","not","note","notebook","nothing","notice","notify","notifying","notion","novel","November","now","nowhere","number","numbers","numeracy","numerator","nurse","nut","nutrition","nutritious","oat","object","objective","observation","observe","observing","obstacle","obtain","obtuse","obvious","occur","ocean","oceans","o'clock","octagon","October","octopus","odd","of","off","offer","offline","often","old","olive","on","once","one","onion","online","only","onomatopoeia","onto","open","operate","opinion","opportunity","oppose","opposite","optional","or","orange","oranges","orbit","orchestra","ordinary","organic","organisation","organise","organising","organism","origin","original","ostrich","otherwise","otter","our","ourselves","out","outback","outcome","outdoor","outline","outrage","outside","outstanding","oval","over","overcome","overcoming","overlook","overnight","overview","overwhelmed","overwhelming","owl","owls","own","ownership","oxygen","pace","Pacific","paddle","painful","paint","painted","painter","painting","paintings","palace","pale","palette","panda","paper","paperback","parable","paragraph","parallel","parent","park","parks","parrot","participate","participating","particle","particular","partnership","party","pass","passed","passport","password","past","pasta","path","paths","patience","pattern","pavement","pavlova","paws","paycheck","peaceful","peach","peacock","peak","pear","peculiar","peel","peeled","peer","pelican","penalty","pencil","pencils","penguin","peninsula","penniless","pentagon","people","pepper","percentage","perfect","perform","performing","perhaps","perimeter","permanent","permission","permit","persist","personal","personality","perspective","persuade","persuading","persuasion","petal","phase","phone","photograph","photosynthesis","physical","pick","picked","picking","picture","pictures","pier","pierce","pig","pigs","pillow","pilot","pink","pixel","pizza","plain","plan","plane","planet","planets","plant","planted","planting","plants","plateau","platform","platypus","play","player","playful","playground","playing","please","pledge","plot","plum","plunge","plus","pocket","poem","pointed","pointless","police","polish","polished","polite","political","pollen","pollinate","pollution","polygon","pond","ponds","pools","popular","population","porcupine","port","portrait","position","positive","possess","possible","potato","potential","pottery","pound","pour","poured","powerful","powerless","practical","practice","practised","practising","praying","precious","precise","predator","predict","predicting","prefix","prehistoric","prepare","prepay","preschool","present","presentation","presenting","preserve","pressure","pretty","prevent","preventing","preview","prey","price","pride","primary","prime","primitive","prince","princess","principal","print","priority","prism","prison","privilege","prize","probability","problem","procedure","process","produce","producing","product","productive","profession","professional","profound","program","progress","progressive","project","promote","promoting","pronoun","proof","propaganda","proper","property","proportion","proposal","propose","protect","protein","protest","proud","prove","provide","providing","province","psychological","publication","publish","puddle","pull","pulling","pumpkin","punctuation","punishment","puppy","purple","purpose","pursue","pursuing","push","pushed","put","puzzle","puzzled","puzzles","pyramid","python","qualification","quality","quarter","queen","queens","question","questioning","quick","quickness","quiet","quotation","rabbit","rabbits","raccoon","race","radical","radius","rage","railway","rain","rainbow","rainbows","raincoat","rainforest","raise","ran","range","rapid","rare","ratio","rational","raven","raw","reach","reached","reaching","react","reacting","reaction","read","reader","reading","realise","realistic","reality","reason","reasonable","rebel","rebuild","recent","reckon","recognise","recognising","recommend","recommendation","recommending","record","recount","recover","recovering","rectangle","recycle","red","reduce","reducing","reef","refer","reference","reflect","reflecting","reflection","reflex","reform","region","regional","regular","regulate","regulation","rehearse","reign","reindeer","reinforce","relate","relationship","relaxation","relaxed","relay","release","relevant","reliable","relief","relieved","religion","rely","remainder","remains","remarkable","remedy","remember","remembered","remembering","remind","reminder","remote","remove","renew","repair","replace","report","reporting","represent","reproduce","reptile","reputation","request","requesting","require","reread","rescue","research","resist","resistance","resolution","resolve","resolving","resource","respire","respond","responding","responsibility","responsible","rest","restless","restore","result","rethink","retreat","retrieve","return","reuse","reveal","revenue","reverse","review","reviewing","revise","revolt","reward","rewrite","rhinoceros","rhyme","rhythm","rice","rich","ridden","ride","ridge","riding","right","rigid","ring","rise","rising","risk","rival","river","rivers","road","roads","robin","robot","robots","robust","rock","rocket","rocks","rocky","role","roll","rolled","rolling","roof","room","rooms","rooster","roots","rot","rotate","rough","round","route","routine","rubbish","rugby","rule","ruler","rulers","run","runner","running","runway","rural","rush","rusty","sacred","sacrifice","sad","sadness","safe","said","salad","salamander","salmon","sand","sandcastle","sandstorm","satellite","satisfaction","Saturday","sauce","savanna","save","saved","saving","saw","say","scale","scared","scary","scatter","scenery","schedule","school","schools","scientific","scientist","score","scorpion","scout","screen","scruffy","sculpture","seafood","seahorse","seal","search","searched","searching","seashore","seaside","season","seasons","seaweed","second","secondary","section","secure","see","seed","seeds","select","selecting","selection","selfish","send","sensation","sense","sensitive","sent","sentence","separate","separating","September","sequence","serious","serve","server","servo","setting","settle","seven","seventeen","seventh","seventy","severe","shadow","shake","shaken","shaking","shall","shape","share","shark","sharks","sharp","she","she'd","sheep","sheila","shelf","she'll","shell","shells","shelter","she's","shift","shine","shining","shiny","ship","shock","shocked","shoe","shoes","shone","shore","short","shortage","shoulder","shouldn't","shout","shouted","shouting","show","showing","shown","shy","sickness","side","signal","significant","silence","silly","silver","similar","simile","simple","simplicity","since","sing","singer","singular","sink","sister","sisterhood","sisters","sit","situation","six","sixteen","sixth","sixty","size","skateboard","sketch","skies","skill","skin","skinny","skip","skipped","skipping","sky","sleep","sleeping","sleepy","slept","slid","slide","sliding","slight","slippery","sloth","slow","small","smell","smelly","smile","smiled","smiles","smiling","smooth","snack","snail","snake","snakes","snow","snowball","snowflake","snowstorm","so","soar","soccer","social","society","soft","softball","softness","software","soggy","soil","solar","soldier","solid","soluble","solution","solve","solved","solving","some","somebody","somehow","someone","something","sometimes","somewhere","song","songs","soon","sort","sorted","sorting","soul","sounds","soup","source","south","southeast","southwest","space","span","sparkling","speak","speaker","speaking","spear","special","species","specific","spectacular","speech","speechless","spelling","sphere","spider","spiders","spiky","spinach","spiral","spirit","splash","splashed","splashing","spoken","spooky","spring","sprint","square","squirrel","stable","stadium","stage","stand","standard","standing","star","starfish","starlight","stars","start","state","statement","station","stations","statistic","statue","stay","stayed","staying","steady","steak","steep","stem","stencil","stick","sticky","stillness","stingray","stomach","stone","stones","stood","stop","stopped","stopping","storeroom","stories","stork","storm","storms","stormy","story","storytelling","straight","strait","strange","strategy","strawberry","stream","street","streetlight","streets","strength","stretch","stretched","stretching","strict","stride","stroke","strong","structure","struggle","stubborn","stuck","student","study","stun","stupid","style","subject","submarine","substance","substantial","subtle","subtract","suburb","success","successful","suddenly","suffix","sugar","suggest","sum","summarise","summer","summers","summit","sun","Sunday","sunflower","sunlight","sunrise","suns","sunset","sunshine","super","superior","supermarket","supervise","support","supporting","surf","surface","surfboard","surprise","surprised","surprises","surroundings","survival","survive","surviving","suspicious","sustain","swamp","swamps","swan","sweet","swift","swim","swimmer","swimming","sword","swum","syllable","symbol","symmetry","synonym","system","systematic","table","tables","tablet","tackle","take","talk","talked","talking","tall","tame","target","task","taste","tasted","tasting","taught","taxi","teach","teacher","teachers","teaching","team","teammate","teamwork","technical","technique","technology","tell","temperature","ten","tennis","tense","tension","tenth","terminal","terrific","territory","terror","test","textbook","texture","than","thank","thankful","that","that's","the","theatre","their","them","theme","then","theory","there","therefore","there's","thesaurus","these","they","they'd","they'll","they're","they've","thick","thickness","thin","thing","things","think","thinker","third","thirteen","thirty","this","thong","thorough","those","though","thoughtful","thoughtfulness","thoughtless","thousand","thousandth","three","thrilled","thriving","through","throughout","throw","throwing","thrown","thumb","thunder","thunderstorm","Thursday","tide","tidy","tiger","tigers","tight","till","timber","time","timeline","timetable","timid","timing","tiny","tired","tissue","title","to","toast","today","toe","together","tolerance","tomato","tomorrow","tone","tongue","tonight","too","tooth","toothbrush","toothpaste","top","topic","torment","tornado","tortoise","total","toucan","touch","touched","touching","tournament","toward","towards","town","towns","toy","toys","trace","track","trade","tradition","traditional","traffic","tragedy","trail","train","trains","tram","transform","transforming","translate","translating","transparent","transport","trap","travel","travelled","travelling","treasure","treatment","treaty","tree","treehouse","trees","tremendous","trial","triangle","tribe","tributary","tricky","tried","trim","triumph","trouble","truck","trunk","trust","truthful","try","trying","tucker","Tuesday","tumble","tuna","tundra","tunnel","tunnels","turkey","turn","turned","turning","turtle","turtles","twelve","twenty","twist","two","typical","ugly","ultimate","umbrella","umbrellas","unable","uncle","unclear","uncomfortable","under","underground","underneath","understand","understanding","underwater","undo","unfair","unfriendly","unhappy","uniform","unique","unite","united","universal","universe","unless","unlike","until","unusual","unwell","up","update","updating","upload","upon","upper","upset","upstairs","urgent","us","use","useful","useless","username","usual","utilise","utter","vacation","valid","validate","validating","valley","valleys","valuable","value","van","vanilla","vapour","variable","various","vast","vegemite","vegetable","vehicle","venture","verb","verify","verifying","version","vertex","vertical","very","vet","via","vibrant","vibrate","vicious","victory","video","view","vigorous","village","villages","villain","vine","violent","violin","virtual","visible","vision","visit","visited","visiting","visitor","visual","visualise","vital","vitamin","vivid","vocabulary","voice","voices","volcano","volcanoes","volleyball","voltage","volume","volunteer","volunteering","vowel","vulnerable","vulture","wait","waited","waiting","wake","walk","walked","walking","wallaby","walrus","want","ward","warm","warn","warning","was","wash","washed","washing","wasn't","wasp","wasteful","watch","watching","water","watercolour","waterfall","watermelon","wave","waved","waves","waving","way","we","weakness","wealth","weapon","weasel","weather","weave","website","we'd","Wednesday","week","weekend","weekly","weeks","weight","welcome","welcoming","we'll","well","went","we're","were","weren't","west","wet","wetland","we've","whale","whales","wharf","what","whatever","what's","when","whenever","where","whereas","where's","wherever","which","whichever","while","whisper","whispered","whispering","white","who","whoever","whole","whom","who's","whose","why","wicked","widespread","width","wield","wiggle","wiggled","wild","wilderness","wildlife","will","willing","wind","windmill","window","winds","winner","winter","winters","wireless","wisdom","wise","wish","wished","with","within","without","witness","witty","wobbly","wolf","wolves","wombat","wonder","wondered","wonderful","wondering","won't","wood","woodpecker","words","work","worker","world","worlds","worldwide","worm","worms","worried","worthless","worthy","would","wouldn't","wretched","wrist","write","writer","writing","written","yak","yakka","year","years","yell","yelled","yelling","yellow","yes","yesterday","yet","yoghurt","you","you'd","you'll","your","you're","yourself","you've","zealous","zebra","zebras","zero","zone","zoom","age","ago","almost","alone","already","art","bad","bike","born","chance","cozy","easy","end","enough","ever","face","favourite","fell","few","fine","flag","food","front","fun","goodbye","goose","hat","hello","hen","life","mess","mom","more","music","need","other","pet","ready","same","secret","sorry","sound","crawly","creepily","happily","grumpily","hungrily","angrily","heavily","busily","lazily","noisily","messily","nastily","uglily","tidily","luckily","easily","sleepily","wiggly","giggly","jiggly","squiggly","bubbly","cuddly","crinkly","sprinkly","twinkly","sparkly","crumbly","grumbly","stumply","prickly","tickly","wrinkly","crinkly","freckly","speckly","brainy","rainy","clayey","grainy","wavy","savvy","groovy","kooky","gooey","chewy","dewy","lewy","snowy","showy","blowy","flowery","showery","powdery","thundery","wintry","summery","springy","autumny","bloody","windy","sunny","foggy","misty","musty","crusty","gusty","busty","lusty","lumpy","dumpy","frumpy","stumpy","clumpy","bony","spotty","dotty","knotty","nutty","putty","tatty","ratty","batty","catty","patty","fatty","natty","matty","fuzzy","fizzy","jazzy","snazzy","whizzy","tizzy","billy","filly","hilly","willy","tilly","milly","timely","homely","likely","unlikely","kingly","queenly","princely","ghostly","beastly","earthly","hourly","nightly","yearly","slowly","quickly","kindly","boldly","coldly","madly","gladly","sadly","oddly","widely","finely","nicely","safely","lately","barely","should","might","dare","ought","used","each","most","such","quite","himself","herself","themselves","anybody","carefully","quietly","loudly","probably","definitely","certainly","really","nearly","quite","rather","photo","photos","phrase","phrases","phonics","physics","thought","laughter","freight","centre","practise","licence","defence","knight","kneel","knot","known","knob","wrong","wrap","wren","wreck","sign","assign","wheel","tough","cough","bought","brought","thought","sought","spread","piece","chief","receive","promise","education","pleasure","official","usually","totally","wall","walls","hall","halls","mall","malls","stall","stalls","cells","smells","spell","spells","swell","yells","dwell","fills","gill","kill","kills","mill","mills","pill","pills","sill","skills","spill","spills","drill","bull","bulls","fully","pulls","null","dolls","toll","tolls","rolls","poll","polls","stroll","sat","set","bet","bit","hit","lot","pot","dot","fit","lit","pit","wit","jet","net","fed","led","wed","bid","hid","rid","jug","mug","rug","tug","pug","fan","pan","tan","bin","din","fin","gin","kin","pin","sin","tin","win","bob","cob","fob","gob","job","lob","mob","rob","sob","cop","mop","pop","bop","cub","dub","hub","pub","rub","sub","tub","bog","cog","fog","hog","jog","log","cap","gap","lap","nap","rap","sap","tap","zap","cab","dab","gab","jab","lab","nab","tab","cod","nod","pod","rod","fig","jig","wig","rig","arc","ark","ash","bud","bun","dam","den","dew","dip","elf","elm","eve","ewe","fad","fee","fib","foe","fur","gap","gut","hay","hue","hut","ink","ivy","jay","joy","key","kid","lag","lay","lea","lid","mad","mob","nit","nun","oak","oar","ore","paw","pay","pea","peg","pie","rat","ray","rib","rim","rip","row","rut","rye","sap","sew","ski","sob","sod","spy","sue","sup","tan","tar","tea","tie","ton","tow","urn","vat","vow","wax","web","wit","woe","yam","yew","war","wars","wards","wary","wed","wee","weed","weeds","weep","mat","meal","still"];
+const WORD_LIST = ["a","abandon","abide","abilities","ability","able","abnormal","abolish","about","above","absence","absorb","absorbing","abstract","abundant","abuse","academic","accelerate","accent","accept","accepting","access","accessing","accident","accidents","accommodate","accomplish","accomplishment","account","accumulate","accurate","ache","achieve","achievement","achieving","aching","acid","acknowledge","across","act","acted","acting","action","actions","activate","active","activity","actor","actress","actual","actually","acute","adapt","add","added","adding","addition","additional","address","addresses","adequate","adjust","admire","adopt","adorable","adore","adult","advance","advanced","advantage","adventure","adventures","adventurous","advertise","advertisement","advice","advise","affect","afford","affordable","afraid","Africa","after","afternoon","afternoons","again","against","aggressive","agree","agreement","ahead","aim","air","airfield","airport","alarm","album","alert","alerting","algebra","algorithm","alike","alive","all","alliance","alligator","allocate","allow","allowance","allowed","allowing","almighty","along","alphabet","also","alter","although","altogether","always","am","amazed","amazing","ambitious","ambulance","America","among","amongst","amount","amusing","an","analyse","ancestor","anchor","ancient","and","angle","angry","animal","animals","anniversary","announce","announcement","answer","answered","answering","answers","ant","Antarctica","anxiety","anxious","any","anyone","anything","anyway","anywhere","apart","apologise","apostrophe","app","apparently","appeal","appealing","appear","apple","apples","apply","applying","appointment","appreciate","approach","appropriate","approval","approve","approximate","approximately","April","archipelago","architect","Arctic","are","area","aren't","argue","argument","arguments","arm","around","arrange","arrangement","arranging","arrive","arrived","arriving","arrowroot","article","artificial","artist","artists","arvo","as","ashamed","Asia","aside","ask","asked","asking","assemble","assist","assume","astronaut","at","ate","athlete","athletes","Atlantic","atmosphere","atoll","atom","attach","attack","attempt","attempts","attend","attending","attention","attitude","attract","attractive","audience","August","aunt","Australia","author","authorise","automatic","autumn","available","average","avocado","avoid","avoiding","award","aware","awareness","away","awesome","awful","awkward","axe","axis","babies","baby","back","backbone","background","backyard","bacon","bacteria","badly","badminton","bag","bake","baked","baker","baking","balance","balanced","balancing","ball","ballet","balloon","balloons","ballpark","balls","ban","banana","bananas","band","bang","banged","banging","banning","bare","bargain","bark","barked","barking","barn","barricade","barrier","base","basement","basic","basin","basis","basketball","bat","bath","bathe","bathed","bathing","bathroom","battery","battle","bay","be","beach","beaches","bean","beans","bear","bears","beat","beautiful","beauty","beaver","because","becomes","bed","bedroom","bedrooms","bee","been","bees","beetle","beetles","before","began","begin","beginning","behave","behind","belief","believe","believed","believing","bell","bells","belong","belonged","belonging","below","beneath","beneficial","benefit","berries","berry","beside","besides","best","bestseller","better","between","beyond","bicycle","big","bill","billabong","billowing","biography","bird","birds","birthday","biscuit","biscuits","bite","bitten","bitter","black","blade","blame","blank","blanket","blankets","blast","blaze","blazing","blend","blending","bless","blessing","blew","blink","block","blocking","bloom","blossom","blossoms","blow","blowing","blue","blueprint","boast","boat","boats","body","boiling","bold","bone","bones","book","bookcase","bookmark","books","bookshelf","boomerang","border","bored","boring","borrowing","both","bother","bottle","bottles","bottom","boulders","bounce","bounced","bouncing","bound","boundary","bouquet","bowl","box","boxes","boy","boys","brain","branch","branches","brave","bravery","bread","break","breakfast","breaking","breath","breathe","breathless","breeze","brekkie","brew","brewery","bricks","bridge","bridges","brief","briefing","briefly","bright","brightness","brilliant","bring","broad","broccoli","broken","brolly","brother","brotherhood","brown","browsing","bruise","brush","bubble","bubbles","buffet","bug","bugs","build","builder","building","built","bumpy","bunch","bundle","bunny","burden","burn","burned","burning","bus","buses","bushfire","busy","but","butter","butterflies","butterfly","button","buttons","buy","buzzing","by","cabinet","cable","cactus","cage","cages","cake","cakes","calculate","calculating","calendar","call","called","calling","calm","came","camel","camera","campaign","camper","campfire","campus","can","canal","cancel","cancelling","candle","candles","candy","cannot","can't","canteen","canvas","canyon","capable","capacity","cape","capital","captain","caption","capture","car","caravan","carbon","cards","care","career","careful","careless","carelessness","caretaker","cargo","carried","carrot","carry","carrying","cars","cart","carton","cartoon","castle","cat","catch","catching","categorise","caterpillar","caught","cause","caused","causing","cautious","cave","caves","cease","ceiling","celebrate","celebrated","celebrating","celebration","cell","census","centimetre","century","cereal","certain","chair","chairs","challenge","challenging","champion","change","changed","changing","channel","chapel","chapter","character","characters","charge","charitable","chart","chase","chased","chasing","chat","check","checked","checking","cheek","cheer","cheerful","cheerfulness","cheese","cheetah","chef","chemical","chest","chew","chewed","chewing","chicken","child","childhood","children","chilly","chimney","chimpanzee","chin","chips","chlorophyll","chocolate","choice","chook","choose","choosing","chord","chorus","chose","chubby","circle","circumference","circus","citizen","city","civilian","claim","claimant","clap","clapped","clapping","clarify","clash","class","classify","classifying","classroom","clause","clay","clean","cleaned","cleaning","clearing","clever","cleverness","click","cliff","climate","climb","climbed","climbing","close","closed","closet","closing","cloud","clouds","cloudy","club","clubhouse","clue","clueless","clumsy","coach","coast","coat","cobra","cockroach","coconut","code","cognitive","coincide","cold","collaborate","collaborating","collage","collapse","collect","collected","collecting","collection","collide","colour","coloured","colourful","colours","column","combative","combine","combining","come","comfort","comfortable","comma","command","commanding","comment","commission","committee","commodity","communicate","community","compact","compare","comparing","compass","compassionate","compete","competing","compile","complaint","complete","completing","complex","compose","compost","compound","comprehensive","compress","computer","computers","concentrate","concentrating","concern","concerned","conclusion","condense","condition","cone","confidence","confident","confirm","confirming","conflict","confuse","confused","confusing","connect","consider","considering","consistent","consonant","constant","construct","constructing","consult","contain","content","contest","continent","continue","contraction","contrary","contrast","contribute","contribution","control","controlling","conventional","conversation","convince","convincing","cook","cookbook","cooked","cookie","cooking","cool","cooperate","cooperating","coordinate","cope","copper","copy","core","corn","corner","correct","costume","cottage","could","couldn't","council","counsel","count","counted","counting","countless","countries","country","countryside","courage","courageous","cousin","cover","covered","cow","cowardly","crab","craft","crane","crash","crawl","crawled","crawling","crazy","cream","create","created","creating","creation","creative","creature","creatures","creepy","crest","crew","cricket","cried","crime","crisis","crispy","critical","criticise","criticising","criticism","crocodile","cross","crowd","crowded","crown","crucial","crumble","cry","crying","crystal","cube","cucumber","cultural","culture","cunning","cup","cupboard","cups","curious","current","curriculum","curtain","curved","cushion","customise","customising","cut","cute","cycle","cyclone","cylinder","dad","daily","damage","damaging","damp","dance","danced","dancer","dances","dancing","danger","dangerous","dangers","daring","dark","darkness","data","daughter","dawn","day","daydream","daylight","days","daytime","dazzle","dazzling","deadline","deal","dear","debate","debating","decade","decay","December","decent","decide","decided","deciding","decimal","decision","decisions","decorating","decoration","decoy","decrease","dedicate","dedicating","deep","deeply","deer","defeat","defend","define","defining","definition","degree","delay","delaying","delete","delicate","delicious","delight","delighted","deliver","delta","demand","demanding","democracy","demonstrate","demonstrating","denominator","dense","dentist","depend","depict","depth","describe","described","describing","desert","design","designing","desire","desperate","despite","destination","destroy","detail","detailed","detective","determine","determined","determining","develop","developing","development","device","devote","devour","devout","diagonal","diagram","dialogue","diamond","dictionary","did","didn't","differ","difference","different","differing","difficult","dig","digest","digging","digit","digital","dimension","dingo","dinner","dinners","dinosaur","dinosaurs","direct","direction","dirt","dirty","disagree","disappear","disappointed","discard","discover","discovered","discovering","discovery","discuss","disgrace","disguise","disgusted","dishonest","dislike","dismiss","disorder","displace","display","displaying","dispute","dissolve","distance","distress","distribute","distributing","district","distrust","diverse","divide","division","dizzy","do","doctor","doctors","document","dodge","does","doesn't","dog","dogs","doll","dolphin","dolphins","dominant","dominate","dominating","done","don't","door","doorbell","doors","doorstep","doorway","double","doubling","doubt","dough","down","downfall","download","downstairs","downtown","dozen","drag","dragon","dragonfly","dragons","drama","dramatic","draw","drawer","drawing","drawings","drawn","dread","dream","dreamed","dreamer","dreaming","dreams","drench","dress","dressed","dressing","dribble","dried","drink","drive","driver","driveway","drop","dropped","dropping","drum","drums","dry","drying","duck","ducks","dug","dull","dunno","duplicate","durable","during","dusk","dusty","duty","dynamic","eager","eagle","eagles","ear","early","earn","earnest","earth","earthquake","earthworm","east","eat","eaten","eating","eats","eclipse","ecosystem","editorial","effect","effective","efficient","effort","egg","eggs","eight","eighteen","eighth","eighty","either","elaborate","elbow","election","electricity","elegant","element","elephant","elephants","eleven","eliminate","eliminating","elsewhere","email","embarrassed","embryo","emerald","emergency","emotion","emotional","emphasise","emphasising","employ","empty","enable","enabling","encourage","encouraging","ending","endless","endure","enemy","energetic","energy","enforce","engine","engineer","engines","enhance","enjoy","enjoyed","enjoying","enormous","entire","entrance","environment","environmental","equal","equation","equator","equipment","erosion","error","eruption","escape","esky","essay","essential","establish","establishing","estimate","estuary","ethical","eucalyptus","Europe","evaluate","evaluating","evaporate","even","evening","event","events","eventual","eventually","every","everyone","everything","everywhere","evidence","evident","evil","evoke","evolution","evolve","exact","examine","examining","example","examples","excellent","except","exception","exceptional","exchange","excited","exciting","exclamation","exclude","excluding","exclusive","excuse","execute","executing","executive","exercise","exhaust","exhausted","exhibit","exhibition","exist","exit","expand","expect","expedition","experience","experiencing","experiment","experimenting","explain","explanation","explicit","explode","explore","explored","explorer","exploring","express","expressing","expression","extend","extended","external","extra","extreme","eye","eyes","fable","faces","fact","factor","factory","fail","failing","failure","faint","fair","fairground","faithful","falcon","fall","fallen","falling","falter","fame","familiar","families","family","famous","fancy","fantastic","fantasy","far","farm","farmer","farmers","farmyard","fast","father","fault","fearful","fearless","feather","feature","featuring","February","feedback","feel","feeling","feelings","feet","felt","fern","ferry","fertilise","festival","fiction","field","fields","fierce","fifteen","fifth","fifty","fight","fighter","figurative","figure","file","fill","filled","filling","filter","filthy","final","finally","find","finger","fingers","finish","fire","firefighter","fires","firework","firm","first","fish","fitness","five","fix","fixed","flame","flames","flamingo","flashlight","flat","flavour","flee","flexible","flight","float","floated","flood","floor","flour","flourish","flow","flower","flowers","fluffy","fluster","flute","fly","flying","focus","focusing","folder","follow","followed","following","foolish","foot","football","footpath","footprint","footy","for","forbid","force","forehead","foreign","forest","forests","forever","forget","forgive","forgotten","formal","formula","formulate","formulating","forty","forward","fossil","fought","found","foundation","four","fourteen","fourth","fox","fraction","fragile","frail","frame","free","freedom","freeze","frenzy","frequent","fresh","friction","Friday","fridge","friend","friendly","friends","friendship","frightened","frightening","frog","frogs","from","frost","frosty","frown","frozen","frugal","fruit","fruits","frustrated","full","fulltime","function","fundamental","fungus","funny","furious","furniture","furthermore","fury","future","galah","galaxy","gallery","game","games","garage","garden","gardens","garlic","gas","gateway","gather","gathering","gave","gaze","gecko","gem","general","generate","generating","generation","generous","genius","gentle","genuine","geometry","germinate","gesture","get","giant","gift","gifts","gigabyte","gigantic","giggle","giggled","giggling","giraffe","girl","girls","give","given","giving","glacier","glad","gleam","glitch","global","gloom","gloomy","glorious","glory","glossary","glossy","glove","glow","glue","gnaw","go","goal","goals","goat","goes","going","gold","goldfish","golf","good","goodness","gorge","gorgeous","gorilla","got","govern","governing","government","grab","grabbed","grabbing","graceful","gracious","gradual","grammar","grandchild","grandeur","grandfather","grandma","grandmother","grandpa","grant","grape","grapes","graph","graphic","grass","grasses","grassland","grateful","gravity","great","greedy","green","greet","grey","grief","grin","ground","grounds","group","grow","growing","growl","grown","grownup","growth","grumpy","guard","guardian","guess","guessed","guessing","guide","guilt","gulf","gum","gymnasium","habit","habitat","had","hadn't","hair","half","hammer","hamster","hand","handbag","handball","handle","hands","handshake","hang","happen","happened","happening","happiness","happy","harbour","hard","hardship","harm","harmful","harmless","harmony","harsh","harvest","has","hasn't","haunted","have","haven't","he","head","headline","headphone","headquarters","healthy","hear","heard","hearing","heart","hearts","heavy","he'd","hedgehog","heel","height","helicopter","he'll","helmet","help","helper","helpful","helpless","hemisphere","her","here","here's","heritage","hero","hers","he's","hexagon","hi","hidden","hide","hiding","high","highland","highlight","highlighting","highway","hilarious","hill","hills","him","hip","hippopotamus","his","hockey","hold","hole","hollow","home","homeless","homes","homework","homophone","honest","honey","honeybee","honour","hop","hope","hoped","hopeful","hopeless","hopes","hoping","hopped","hopping","horizon","horizontal","horrible","horrified","horror","horse","horseback","horses","hot","hotel","hour","house","household","houses","how","however","how's","hug","huge","hugged","hugging","humble","humorous","hundred","hundredth","hungry","hunt","hunted","hunter","hunting","hurdle","hurricane","hurried","hurry","hurrying","hurt","hypothesis","i","I","ice","icy","I'd","idea","ideal","ideas","identical","identify","identity","idiom","idiotic","if","ignore","I'll","illustrate","illustrating","I'm","imagination","imagine","imagined","imagining","immediate","immediately","immense","impact","implement","implementing","impolite","important","impossible","impress","impression","improve","improvement","improving","in","inch","include","incorrect","increase","incredible","indeed","independence","independent","index","indicate","indicating","individual","indoor","inference","inferior","influence","inform","informal","information","ingredient","inherit","initial","injury","innocent","innovative","insect","insects","inside","insist","inspect","inspire","inspiring","install","instead","instinct","instruct","instructing","instruction","instrument","insulate","integer","intellectual","intelligent","intend","intense","interactive","interest","interesting","internal","internet","interpret","interpretation","interpreting","interview","into","introduce","introduction","invention","inventor","investigate","investigating","investigation","invisible","invitation","invite","invited","involve","is","island","islands","isn't","isolate","issue","it","itchy","item","it's","its","itself","I've","jacket","jagged","jaguar","jam","January","jar","jars","jaw","jawbone","jealous","jelly","jetty","jogging","joint","jolly","journal","journey","journeys","joyful","judge","juice","juicy","July","jump","jumped","jumping","jumpy","June","jungle","jungles","just","justify","justifying","kangaroo","kayak","keep","keeper","keyboard","kick","kicked","kicking","kilogram","kilometre","kind","kindness","king","kingdom","kings","kiss","kissed","kitchen","kitten","kittens","kitty","knee","knock","knocked","knocking","know","knowledge","koala","kookaburra","label","lacrosse","ladder","ladders","ladybug","lagoon","lair","lake","lakes","lamp","lamps","land","landed","landing","lands","landscape","lane","language","large","larrikin","last","latitude","laugh","laughed","laughing","launch","launching","lava","layer","lazy","leader","leadership","leaf","lean","leap","learn","learned","learning","leave","leaves","left","leg","legend","lemon","length","leopard","let","let's","letter","letters","lettuce","librarian","libraries","library","lifelong","lifestyle","lift","lifted","lifting","light","lighthouse","lightning","lights","like","likelihood","likewise","limitation","limited","link","lion","lions","lip","liquid","listen","listened","listening","literacy","literature","litre","little","live","lived","livelihood","lively","lives","living","lizard","lizards","load","loaf","lobster","locate","location","logical","login","lonely","long","longitude","look","loosen","lose","loss","lost","loud","love","loved","lovely","loving","lowland","loyal","luck","lucky","lunch","lunchbox","lunchtime","ma'am","machinery","made","magazine","magic","magical","magnet","magnetic","magnificent","magpie","mailbox","main","mainstream","maintain","maintaining","major","make","maker","mammal","man","manage","managing","manatee","mango","manipulate","manipulating","manner","manual","many","map","marathon","march","March","marched","marching","mark","market","marsh","martial","marvel","mass","massive","match","mate","material","matter","mature","May","may","me","meadow","mean","meaning","meanwhile","measure","meat","median","medicine","Mediterranean","meerkat","meet","meeting","melancholy","melody","melon","melt","melted","melting","membership","memorise","memorising","memory","men","mental","mention","merit","message","messy","metaphor","meteor","method","metre","mice","microphone","microscope","middle","midnight","midpoint","mighty","milk","millimetre","mind","mine","mineral","miniature","minimal","minus","minute","miracle","mirror","miserable","mislead","misplace","misread","mission","mist","mistake","misuse","mix","mixture","mobile","mode","model","moderate","modify","moisture","molecule","moment","Monday","money","monitor","monitoring","monkey","monkeys","month","monthly","monument","moon","moonlight","moons","moose","moral","moreover","morning","mosaic","moss","mostly","moth","mother","mothers","motif","motion","motivate","motivating","motive","motorway","mount","mountain","mountains","mouse","move","moved","moving","mozzarella","much","mud","muddy","multiple","multiply","mum","mural","muscle","museum","mushroom","musical","musician","must","mustn't","mutual","my","myself","mysteries","mysterious","mystery","myth","nail","name","names","narrative","narrator","narrow","nasty","nation","national","natural","nature","naughty","navigate","navigating","near","nearby","neat","necessary","neck","negative","negotiate","negotiating","neighbour","neighbourhood","nervous","nest","nests","netball","network","neutral","never","nevertheless","new","next","nice","night","nightmare","nights","nighttime","nine","nineteen","ninety","ninth","no","noble","nobody","noisy","nonfiction","noodle","normal","north","northeast","northwest","nose","not","note","notebook","nothing","notice","notify","notifying","notion","novel","November","now","nowhere","number","numbers","numeracy","numerator","nurse","nut","nutrition","nutritious","oat","object","objective","observation","observe","observing","obstacle","obtain","obtuse","obvious","occur","ocean","oceans","o'clock","octagon","October","octopus","odd","of","off","offer","offline","often","oh","old","olive","on","once","one","onion","online","only","onomatopoeia","onto","open","operate","opinion","opportunity","oppose","opposite","optional","or","orange","oranges","orbit","orchestra","ordinary","organic","organisation","organise","organising","organism","origin","original","ostrich","otherwise","otter","our","ourselves","out","outback","outcome","outdoor","outline","outrage","outside","outstanding","oval","over","overcome","overcoming","overlook","overnight","overview","overwhelmed","overwhelming","owl","owls","own","ownership","oxygen","pace","Pacific","paddle","painful","paint","painted","painter","painting","paintings","palace","pale","palette","panda","paper","paperback","parable","paragraph","parallel","parent","park","parks","parrot","participate","participating","particle","particular","partnership","party","pass","passed","passport","password","past","pasta","path","paths","patience","pattern","pavement","pavlova","paws","paycheck","peaceful","peach","peacock","peak","pear","peculiar","pee","peel","peeled","peer","pelican","penalty","pencil","pencils","penguin","peninsula","penniless","pentagon","people","pepper","percentage","perfect","perform","performing","perhaps","perimeter","permanent","permission","permit","persist","personal","personality","perspective","persuade","persuading","persuasion","petal","phase","phone","photograph","photosynthesis","physical","pick","picked","picking","picture","pictures","pier","pierce","pig","pigs","pillow","pilot","pink","pixel","pizza","plain","plan","plane","planet","planets","plant","planted","planting","plants","plateau","platform","platypus","play","player","playful","playground","playing","please","pledge","plot","plum","plunge","plus","pocket","poem","pointed","pointless","police","polish","polished","polite","political","pollen","pollinate","pollution","polygon","pond","ponds","pools","popular","population","porcupine","port","portrait","position","positive","possess","possible","potato","potential","pottery","pound","pour","poured","powerful","powerless","practical","practice","practised","practising","praying","precious","precise","predator","predict","predicting","prefix","prehistoric","prepare","prepay","preschool","present","presentation","presenting","preserve","pressure","pretty","prevent","preventing","preview","prey","price","pride","primary","prime","primitive","prince","princess","principal","print","priority","prism","prison","privilege","prize","probability","problem","procedure","process","produce","producing","product","productive","profession","professional","profound","program","progress","progressive","project","promote","promoting","pronoun","proof","propaganda","proper","property","proportion","proposal","propose","protect","protein","protest","proud","prove","provide","providing","province","psychological","publication","publish","puddle","pull","pulling","pumpkin","punctuation","punishment","puppy","purple","purpose","pursue","pursuing","push","pushed","put","puzzle","puzzled","puzzles","pyramid","python","qualification","quality","quarter","queen","queens","question","questioning","quick","quickness","quiet","quotation","rabbit","rabbits","raccoon","race","radical","radius","rage","railway","rain","rainbow","rainbows","raincoat","rainforest","raise","ran","range","rapid","rare","ratio","rational","raven","raw","reach","reached","reaching","react","reacting","reaction","read","reader","reading","realise","realistic","reality","reason","reasonable","rebel","rebuild","recent","reckon","recognise","recognising","recommend","recommendation","recommending","record","recount","recover","recovering","rectangle","recycle","red","reduce","reducing","reef","refer","reference","reflect","reflecting","reflection","reflex","reform","region","regional","regular","regulate","regulation","rehearse","reign","reindeer","reinforce","relate","relationship","relaxation","relaxed","relay","release","relevant","reliable","relief","relieved","religion","rely","remainder","remains","remarkable","remedy","remember","remembered","remembering","remind","reminder","remote","remove","renew","repair","replace","report","reporting","represent","reproduce","reptile","reputation","request","requesting","require","reread","rescue","research","resist","resistance","resolution","resolve","resolving","resource","respire","respond","responding","responsibility","responsible","rest","restless","restore","result","rethink","retreat","retrieve","return","reuse","reveal","revenue","reverse","review","reviewing","revise","revolt","reward","rewrite","rhinoceros","rhyme","rhythm","rice","rich","ridden","ride","ridge","riding","right","rigid","ring","rise","rising","risk","rival","river","rivers","road","roads","robin","robot","robots","robust","rock","rocket","rocks","rocky","role","roll","rolled","rolling","roof","room","rooms","rooster","roots","rot","rotate","rough","round","route","routine","rubbish","rugby","rule","ruler","rulers","run","runner","running","runway","rural","rush","rusty","sacred","sacrifice","sad","sadness","safe","said","salad","salamander","salmon","sand","sandcastle","sandstorm","satellite","satisfaction","Saturday","sauce","savanna","save","saved","saving","saw","say","scale","scared","scary","scatter","scenery","schedule","school","schools","scientific","scientist","score","scorpion","scout","screen","scruffy","sculpture","seafood","seahorse","seal","search","searched","searching","seashore","seaside","season","seasons","seaweed","second","secondary","section","secure","see","seed","seeds","select","selecting","selection","selfish","send","sensation","sense","sensitive","sent","sentence","separate","separating","September","sequence","serious","serve","server","servo","setting","settle","seven","seventeen","seventh","seventy","severe","shadow","shake","shaken","shaking","shall","shape","share","shark","sharks","sharp","she","she'd","sheep","sheila","shelf","she'll","shell","shells","shelter","she's","shift","shine","shining","shiny","ship","shock","shocked","shoe","shoes","shone","shore","short","shortage","shoulder","shouldn't","shout","shouted","shouting","show","showing","shown","shy","sickness","side","signal","significant","silence","silly","silver","similar","simile","simple","simplicity","since","sing","singer","singular","sink","sister","sisterhood","sisters","sit","situation","six","sixteen","sixth","sixty","size","skateboard","sketch","skies","skill","skin","skinny","skip","skipped","skipping","sky","sleep","sleeping","sleepy","slept","slid","slide","sliding","slight","slippery","sloth","slow","small","smell","smelly","smile","smiled","smiles","smiling","smooth","snack","snail","snake","snakes","snow","snowball","snowflake","snowstorm","so","soar","soccer","social","society","soft","softball","softness","software","soggy","soil","solar","soldier","solid","soluble","solution","solve","solved","solving","some","somebody","somehow","someone","something","sometimes","somewhere","song","songs","soon","sort","sorted","sorting","soul","sounds","soup","source","south","southeast","southwest","space","span","sparkling","speak","speaker","speaking","spear","special","species","specific","spectacular","speech","speechless","spelling","sphere","spider","spiders","spiky","spinach","spiral","spirit","splash","splashed","splashing","spoken","spooky","spring","sprint","square","squirrel","stable","stadium","stage","stand","standard","standing","star","starfish","starlight","stars","start","state","statement","station","stations","statistic","statue","stay","stayed","staying","steady","steak","steep","stem","stencil","stick","sticky","stillness","stingray","stomach","stone","stones","stood","stop","stopped","stopping","storeroom","stories","stork","storm","storms","stormy","story","storytelling","straight","strait","strange","strategy","strawberry","stream","street","streetlight","streets","strength","stretch","stretched","stretching","strict","stride","stroke","strong","structure","struggle","stubborn","stuck","student","study","stun","stupid","style","subject","submarine","substance","substantial","subtle","subtract","suburb","success","successful","suddenly","suffix","sugar","suggest","sum","summarise","summer","summers","summit","sun","Sunday","sunflower","sunlight","sunrise","suns","sunset","sunshine","super","superior","supermarket","supervise","support","supporting","surf","surface","surfboard","surprise","surprised","surprises","surroundings","survival","survive","surviving","suspicious","sustain","swamp","swamps","swan","sweet","swift","swim","swimmer","swimming","sword","swum","syllable","symbol","symmetry","synonym","system","systematic","table","tables","tablet","tackle","take","talk","talked","talking","tall","tame","target","task","taste","tasted","tasting","taught","taxi","teach","teacher","teachers","teaching","team","teammate","teamwork","technical","technique","technology","tell","temperature","ten","tennis","tense","tension","tenth","terminal","terrific","territory","terror","test","tested","testing","tests","textbook","texture","than","thank","thankful","that","that's","the","theatre","their","them","theme","then","theory","there","therefore","there's","thesaurus","these","they","they'd","they'll","they're","they've","thick","thickness","thin","thing","things","think","thinker","third","thirteen","thirty","this","thong","thorough","those","though","thoughtful","thoughtfulness","thoughtless","thousand","thousandth","three","thrilled","thriving","through","throughout","throw","throwing","thrown","thumb","thunder","thunderstorm","Thursday","tide","tidy","tiger","tigers","tight","till","timber","time","timeline","timetable","timid","timing","tiny","tired","tissue","title","to","toast","today","toe","together","tolerance","tomato","tomorrow","tone","tongue","tonight","too","tooth","toothbrush","toothpaste","top","topic","torment","tornado","tortoise","total","toucan","touch","touched","touching","tournament","toward","towards","town","towns","toy","toys","trace","track","trade","tradition","traditional","traffic","tragedy","trail","train","trains","tram","transform","transforming","translate","translating","transparent","transport","trap","travel","travelled","travelling","treasure","treatment","treaty","tree","treehouse","trees","tremendous","trial","triangle","tribe","tributary","tricky","tried","trim","triumph","trouble","truck","trunk","trust","truthful","try","trying","tucker","Tuesday","tumble","tuna","tundra","tunnel","tunnels","turkey","turn","turned","turning","turtle","turtles","twelve","twenty","twist","two","typical","ugly","ultimate","umbrella","umbrellas","unable","uncle","unclear","uncomfortable","under","underground","underneath","understand","understanding","underwater","undo","unfair","unfriendly","unhappy","uniform","unique","unite","united","universal","universe","unless","unlike","until","unusual","unwell","up","update","updating","upload","upon","upper","upset","upstairs","urgent","us","use","useful","useless","username","usual","utilise","utter","vacation","valid","validate","validating","valley","valleys","valuable","value","van","vanilla","vapour","variable","various","vast","vegemite","vegetable","vehicle","venture","verb","verify","verifying","version","vertex","vertical","very","vet","via","vibrant","vibrate","vicious","victory","video","view","vigorous","village","villages","villain","vine","violent","violin","virtual","visible","vision","visit","visited","visiting","visitor","visual","visualise","vital","vitamin","vivid","vocabulary","voice","voices","volcano","volcanoes","volleyball","voltage","volume","volunteer","volunteering","vowel","vulnerable","vulture","wait","waited","waiting","wake","walk","walked","walking","wallaby","walrus","want","ward","warm","warn","warning","was","wash","washed","washing","wasn't","wasp","wasteful","watch","watching","water","watercolour","waterfall","watermelon","wave","waved","waves","waving","way","we","weakness","wealth","weapon","weasel","weather","weave","website","we'd","Wednesday","week","weekend","weekly","weeks","weight","welcome","welcoming","we'll","well","went","we're","were","weren't","west","wet","wetland","we've","whale","whales","wharf","what","whatever","what's","when","whenever","where","whereas","where's","wherever","which","whichever","while","whisper","whispered","whispering","white","who","whoever","whole","whom","who's","whose","why","wicked","widespread","width","wield","wiggle","wiggled","wild","wilderness","wildlife","will","willing","wind","windmill","window","winds","winner","winter","winters","wireless","wisdom","wise","wish","wished","with","within","without","witness","witty","wobbly","wolf","wolves","wombat","wonder","wondered","wonderful","wondering","won't","wood","woodpecker","words","work","worker","world","worlds","worldwide","worm","worms","worried","worthless","worthy","would","wouldn't","wretched","wrist","write","writer","writing","written","yak","yakka","year","years","yell","yelled","yelling","yellow","yes","yesterday","yet","yoghurt","you","you'd","you'll","your","you're","yourself","you've","zealous","zebra","zebras","zero","zone","zoom","age","ago","almost","alone","already","art","bad","bike","born","chance","cozy","easy","end","enough","ever","face","favourite","fell","few","fine","flag","food","front","fun","goodbye","goose","hat","hello","hen","life","mess","mom","more","music","need","other","pet","ready","same","secret","sorry","sound","crawly","creepily","happily","grumpily","hungrily","angrily","heavily","busily","lazily","noisily","messily","nastily","uglily","tidily","luckily","easily","sleepily","wiggly","giggly","jiggly","squiggly","bubbly","cuddly","crinkly","sprinkly","twinkly","sparkly","crumbly","grumbly","stumply","prickly","tickly","wrinkly","crinkly","freckly","speckly","brainy","rainy","clayey","grainy","wavy","savvy","groovy","kooky","gooey","chewy","dewy","lewy","snowy","showy","blowy","flowery","showery","powdery","thundery","wintry","summery","springy","autumny","bloody","windy","sunny","foggy","misty","musty","crusty","gusty","busty","lusty","lumpy","dumpy","frumpy","stumpy","clumpy","bony","spotty","dotty","knotty","nutty","putty","tatty","ratty","batty","catty","patty","fatty","natty","matty","fuzzy","fizzy","jazzy","snazzy","whizzy","tizzy","billy","filly","hilly","willy","tilly","milly","timely","homely","likely","unlikely","kingly","queenly","princely","ghostly","beastly","earthly","hourly","nightly","yearly","slowly","quickly","kindly","boldly","coldly","madly","gladly","sadly","oddly","widely","finely","nicely","safely","lately","barely","should","might","dare","ought","used","each","most","such","quite","himself","herself","themselves","anybody","carefully","quietly","loudly","probably","definitely","certainly","really","nearly","quite","rather","photo","photos","phrase","phrases","phonics","physics","thought","laughter","freight","centre","practise","licence","defence","knight","kneel","knot","known","knob","wrong","wrap","wren","wreck","sign","assign","wheel","tough","cough","bought","brought","thought","sought","spread","piece","chief","receive","promise","education","pleasure","official","usually","totally","wall","walls","hall","halls","mall","malls","stall","stalls","cells","smells","spell","spells","swell","yells","dwell","fills","gill","kill","kills","mill","mills","pill","pills","sill","skills","spill","spills","drill","bull","bulls","fully","pulls","null","dolls","toll","tolls","rolls","poll","polls","stroll","sat","set","bet","bit","hit","lot","pot","dot","fit","lit","pit","wit","jet","net","fed","led","wed","bid","hid","rid","jug","mug","rug","tug","pug","fan","pan","tan","bin","din","fin","gin","kin","pin","sin","tin","win","bob","cob","fob","gob","job","lob","mob","rob","sob","cop","mop","pop","bop","cub","dub","hub","pub","rub","sub","tub","bog","cog","fog","hog","jog","log","cap","gap","lap","nap","rap","sap","tap","zap","cab","dab","gab","jab","lab","nab","tab","cod","nod","pod","rod","fig","jig","wig","rig","arc","ark","ash","bud","bun","dam","den","dew","dip","elf","elm","eve","ewe","fad","fee","fib","foe","fur","gap","gut","hay","hue","hut","ink","ivy","jay","joy","key","kid","lag","lay","lea","lid","mad","mob","nit","nun","oak","oar","ore","paw","pay","pea","peg","pie","rat","ray","rib","rim","rip","row","rut","rye","sap","sew","ski","sob","sod","spy","sue","sup","tan","tar","tea","tie","ton","tow","urn","vat","vow","wax","web","wit","woe","yam","yew","war","wars","wards","wary","wed","wee","weed","weeds","weep","mat","meal","still"];
 const WORD_SET = new Set(WORD_LIST.map(w => w.toLowerCase()));
 
 // Levenshtein distance for spell correction
@@ -1355,9 +1465,27 @@ function phonemeVariants(w) {
   return [...variants];
 }
 
+// Single letters that kids commonly type as shorthand for a whole word
+// that sounds like the letter's name ("r" for "are", "u" for "you", "c"
+// for "see", etc). The edit-distance/Datamuse pipeline below is built for
+// real words of length >= 2 and doesn't run for single letters at all, so
+// without this a single letter never gets a useful suggestion — these are
+// handled directly instead, as the top (and only) suggestion(s).
+const LETTER_HOMOPHONES = {
+  r: ['are'], y: ['why'], b: ['be', 'bee'], c: ['see'], i: ['eye'],
+  o: ['oh'], p: ['pee', 'pea'], s: ['is'], t: ['tea'], u: ['you'],
+};
+
 function getSpellSuggestionsAsync(word, callback) {
   const w = word.toLowerCase().replace(/[^a-z']/g, '');
-  if (!w || w.length < 2) { callback(null); return; }
+  if (!w) { callback(null); return; }
+
+  if (w.length === 1) {
+    const homophones = LETTER_HOMOPHONES[w];
+    callback(homophones ? homophones.map(hw => ({ word: hw, def: null })) : null);
+    return;
+  }
+
   // For correctly spelled words we still want alternatives —
   // only exclude the word itself from suggestions, don't bail out early.
   const isCorrect = WORD_SET.has(w);
@@ -1457,6 +1585,23 @@ function getSpellSuggestionsAsync(word, callback) {
         if (phoneticBonus.has(cand)) return 600; // phonetic match, slightly less
         return 0;
       };
+      // Real-world usage frequency (uses per million), from the md=f tag —
+      // see MIN_VALID_FREQ comment for why we need this alongside `score`.
+      function freqOf(entry) {
+        if (!entry || !entry.tags) return 0;
+        const tag = entry.tags.find(t => t.startsWith('f:'));
+        return tag ? (parseFloat(tag.slice(2)) || 0) : 0;
+      }
+      // A one-character length difference is completely normal for a real
+      // correction (silent letters, doubled consonants, vowel-team spellings
+      // like "sed"→"said" or "hoping"→"hopping") — it shouldn't cost a
+      // candidate anything. Only penalize once the gap grows past that, so a
+      // handful of coincidentally same-length-but-less-likely words (e.g.
+      // "sad"/"say"/"saw" for "sed") can't crowd out the actual best answer
+      // ("said") purely on a length tie-break.
+      function lenPenalty(a, b) {
+        return Math.max(0, Math.abs(a.length - b.length) - 1) * 30;
+      }
 
       localCands.forEach(c => {
         const cl = c.word.toLowerCase();
@@ -1475,12 +1620,16 @@ function getSpellSuggestionsAsync(word, callback) {
             + (silentEBonus.has(cl) ? 600 : 0)
             + (phoneticBonus.has(cl) ? 1800 : 0)   // strong boost for phonetic match
             - c.dist * 200
-            - Math.abs(cl.length - w.length) * 30 });
+            - lenPenalty(cl, w) });
       });
       data.forEach(d => {
         const dl = d.word.toLowerCase();
         if (isBlocked(dl)) return;
-        if ((d.score || 0) < MIN_VALID_SCORE) return;
+        const freq = freqOf(d);
+        // Reject only if BOTH the phonetic-closeness score is weak AND the
+        // word isn't a genuinely common one — a low `score` alone isn't
+        // enough to discard a word real kids actually use (see MIN_VALID_FREQ).
+        if ((d.score || 0) < MIN_VALID_SCORE && freq < MIN_VALID_FREQ) return;
         if (seen.has(dl)) {
           const ex = results.find(r => r.word.toLowerCase() === dl);
           if (ex) ex.score += 300;
@@ -1494,16 +1643,21 @@ function getSpellSuggestionsAsync(word, callback) {
             + firstLetterBonus(dl)
             + (HIGH_FREQ_WORDS.has(dl) ? 1500 : 0)
             + (phoneticBonus.has(dl) ? 1800 : 0)
+            + Math.min(freq, 50) * 20   // reward genuinely common real words
             - dist * 200
-            - Math.abs(dl.length - w.length) * 30 });
+            - lenPenalty(dl, w) });
       });
       results.sort((a, b) => b.score - a.score);
       const final = results.filter(r => r.word.toLowerCase() !== w).slice(0, 7).map(r => ({ word: r.word, def: r.def }));
       callback(final.length ? final : null);
     })
     .catch(() => {
-      // Datamuse unavailable — local only
-      localCands.sort((a, b) => a.dist - b.dist || Math.abs(a.word.length - w.length) - Math.abs(b.word.length - w.length));
+      // Datamuse unavailable — local only. Same reasoning as lenPenalty()
+      // above: a 1-character length difference is normal for a genuine
+      // correction and shouldn't out-rank it against same-length words that
+      // just happen to also be nearby edits (see "sed"→"said" vs "sad"/"say"/etc).
+      const lenGap = (word) => Math.max(0, Math.abs(word.length - w.length) - 1);
+      localCands.sort((a, b) => a.dist - b.dist || lenGap(a.word) - lenGap(b.word));
       const final = localCands.filter(c => c.word.toLowerCase() !== w).slice(0, 7).map(c => ({ word: c.word, def: null }));
       callback(final.length ? final : null);
     });
@@ -5032,6 +5186,15 @@ function hideDD(reason) {
   // not for internal/programmatic closes during spell pass etc.
   const cancelReasons = ['doc-mousedown', 'insertWord', 'escape', 'editor-click-space', 'editor-click-dismiss'];
   if (cancelReasons.includes(reason)) speechSynthesis.cancel();
+  // getWordAtPoint() strips every misspelled-word underline from the whole
+  // editor whenever the click lands on a correctly-spelled word (it needs
+  // plain, un-fragmented text nodes to detect word boundaries) — and
+  // nothing else restores them. Without this, the red squiggly underlines
+  // would just stay gone until some unrelated edit happened to trigger the
+  // next spell pass. runSpellPass() already no-ops safely if there's
+  // nothing to do (assist off, no text, mid-highlight, etc.), so it's safe
+  // to schedule here unconditionally every time the dropdown closes.
+  scheduleSpellPass();
 }
 function setActive(i) { dropdown.querySelectorAll('.drop-item').forEach((el,j) => el.classList.toggle('active', j===i)); activeIdx = i; }
 
@@ -5099,10 +5262,17 @@ editor.addEventListener('click', e => {
   const onWord = /[a-zA-Z'\u2019]/.test(charAt) || /[a-zA-Z'\u2019]/.test(charBefore);
 
   if (onWord) {
-    // Show word alternatives — getWordAtPoint will set its own selection
+    // Show word alternatives — getWordAtPoint will set its own selection.
+    // Single-character words (e.g. "r", "u") are a valid case too — they
+    // can have their own correction/alternatives (like the letter
+    // homophones "are", "you"), so don't require length >= 2 here. This
+    // matters because a single misspelled letter renders as a very narrow
+    // <span class="misspelled"> — an imprecise click can easily miss that
+    // span's tiny hit area and land on the editor itself instead, which
+    // routes through here rather than the direct-span-click branch above.
     spellDDActive = true;
     const info = getWordAtPoint(e.clientX, e.clientY);
-    if (info && info.word.length >= 2) {
+    if (info && info.word.length >= 1) {
       showSpellDD(info);
       return;
     }
@@ -5221,9 +5391,17 @@ function speakAll() {
   if (currentVoice) u.voice = currentVoice;
   u.rate = 0.88; u.pitch = 1.0;
 
-  // Build word position list for timer-based fallback
+  // Build word position list. This drives the timer-based fallback, and
+  // also acts as the authoritative reference list for detecting words the
+  // browser's own onboundary events silently skip (see below). Digits are
+  // included — some engines (notably Chrome's network voices) never fire a
+  // 'word' boundary event for a bare numeral, since it gets expanded to a
+  // spoken word like "three" internally before being read out. Previously
+  // this regex excluded digits, so numerals were invisible to both the
+  // fallback timer and the skip-detection, which is why they never got
+  // highlighted and the highlight appeared to stall/mistime around them.
   const wordPositions = [];
-  const wordRe = /[a-zA-Z'\u2019]+/g;
+  const wordRe = /[a-zA-Z0-9'\u2019]+/g;
   let m;
   while ((m = wordRe.exec(t)) !== null) {
     wordPositions.push({ start: m.index, len: m[0].length, word: m[0] });
@@ -5232,6 +5410,9 @@ function speakAll() {
   let boundaryFired = false;
   let timerHandle = null;
   let wordIdx = 0;
+  // Index into wordPositions of the last word actually confirmed by a real
+  // boundary event, so we can spot gaps (skipped words) in later events.
+  let lastRealIdx = -1;
 
   // Estimate ms per character at rate 0.88 (~130 wpm average, ~5 chars/word)
   // ~130 words/min = ~2.17 words/sec → ~460ms/word → ~92ms/char
@@ -5254,14 +5435,50 @@ function speakAll() {
     stepWord();
   }
 
+  // Find the index in our own word list whose range starts at/after a
+  // given character offset — used to line the browser's boundary events up
+  // with our list so we can spot ones it skipped entirely.
+  function wordIndexAt(charIdx) {
+    for (let i = 0; i < wordPositions.length; i++) {
+      if (wordPositions[i].start >= charIdx) return i;
+    }
+    return wordPositions.length - 1;
+  }
+
   u.onboundary = (e) => {
     if (e.name !== 'word') return;
     boundaryFired = true;
     clearTimeout(timerHandle);
     const charIdx = e.charIndex;
+    const idx = wordIndexAt(charIdx);
     const wordLen = e.charLength || guessWordLength(t, charIdx);
-    debugLog('boundary: charIdx=' + charIdx + ' len=' + wordLen + ' word="' + t.slice(charIdx, charIdx+wordLen) + '"');
-    highlightWordAtOffset(charIdx, wordLen);
+
+    function showCurrent() {
+      debugLog('boundary: charIdx=' + charIdx + ' len=' + wordLen + ' word="' + t.slice(charIdx, charIdx+wordLen) + '"');
+      highlightWordAtOffset(charIdx, wordLen);
+      lastRealIdx = idx;
+    }
+
+    const skipped = [];
+    for (let s = lastRealIdx + 1; s < idx; s++) if (wordPositions[s]) skipped.push(wordPositions[s]);
+
+    if (!skipped.length) {
+      showCurrent();
+    } else {
+      // The engine jumped ahead of our list — one or more words (typically
+      // numerals) never got their own boundary event. Reveal them briefly,
+      // in order, before landing on the word the browser says it's on now,
+      // so nothing silently disappears and the sequence stays intact.
+      debugLog('boundary: skipped ' + skipped.length + ' word(s) — ' + skipped.map(w => w.word).join(', '));
+      let i = 0;
+      const stepSkip = () => {
+        if (i >= skipped.length) { showCurrent(); return; }
+        const wp = skipped[i++];
+        highlightWordAtOffset(wp.start, wp.len);
+        timerHandle = setTimeout(stepSkip, Math.max(120, wp.len * msPerChar));
+      };
+      stepSkip();
+    }
   };
 
   u.onstart = () => {
@@ -5330,6 +5547,7 @@ function clearWordHighlight() {
 
 function clearAll() {
   if (!confirm('Start a new session? This will clear the writing and reset all stats.')) return;
+  if (typeof dictating !== 'undefined' && dictating) abortDictation();
   editor.innerHTML = '';
   sess.log = []; sess.spellCount = 0; sess.events = [];
   verifiedWords.clear(); rejectedWords.clear(); pendingWords.clear();
@@ -5367,7 +5585,8 @@ function buildReportText() {
   const sugg = sess.log.filter(e => e.how === 'suggestion').length;
   const spell = sess.log.filter(e => e.how === 'corrected').length;
   const typed = sess.log.filter(e => e.how === 'typed').length;
-  const rate = sess.log.length > 0 ? Math.round((sugg+spell)/sess.log.length*100) + '%' : '0%';
+  const voice = sess.log.filter(e => e.how === 'dictated').length;
+  const rate = sess.log.length > 0 ? Math.round((sugg+spell+voice)/sess.log.length*100) + '%' : '0%';
   const date = new Date().toLocaleDateString('en-AU', {day:'2-digit',month:'short',year:'numeric'});
   let out = '=== WORD HELPER SESSION REPORT ===\n';
   out += 'Student: ' + name + '   |   Date: ' + date + '\n';
@@ -5383,6 +5602,7 @@ function buildReportText() {
   out += 'Total words:        ' + wc + '\n';
   out += 'From suggestions:   ' + sugg + '\n';
   out += 'From spell corrections: ' + spell + '\n';
+  out += 'From voice dictation: ' + voice + '\n';
   out += 'Typed manually:     ' + typed + '\n';
   out += 'Assistance rate:    ' + rate + '\n';
   const ins = calcInsightStats();
@@ -5412,7 +5632,46 @@ function doCopy(text, msg) {
   });
 }
 function copyText() { const t = editor.innerText.trim(); if (!t) { showToast('Nothing to copy yet!'); return; } doCopy(t, '\u2705 Writing copied — paste with Ctrl+V / Cmd+V'); }
-function copyTextAndReport() { const t = editor.innerText.trim(); if (!t) { showToast('Nothing to copy yet!'); return; } doCopy(buildReportText(), '\u2705 Text + report copied — paste with Ctrl+V / Cmd+V'); }
+
+function copyTextAndReport() {
+  const t = editor.innerText.trim();
+  if (!t) { showToast('Nothing to copy yet!'); return; }
+  const reportText = buildReportText();
+  const plainMsg = '\u2705 Text + report copied — paste with Ctrl+V / Cmd+V';
+
+  const canvas = document.getElementById('session-canvas');
+  const canCopyRich = canvas && window.ClipboardItem && navigator.clipboard && navigator.clipboard.write;
+  if (!canCopyRich) { doCopy(reportText, plainMsg); return; }
+
+  drawGraph(); // ensure the canvas reflects the latest session data before we grab it
+
+  let dataUrl = null;
+  try { dataUrl = canvas.toDataURL('image/png'); } catch (err) { debugLog('copy+report: canvas.toDataURL failed — ' + err); }
+
+  // Rich (HTML) representation embeds the graph inline with the text, so
+  // pasting into Docs/Word/Gmail/etc. shows both together in one paste.
+  // We also offer a plain image/png representation for targets that only
+  // accept a raw image, and plain text for anything text-only — the paste
+  // target picks whichever representation it understands.
+  const html = '<pre style="font-family:monospace;white-space:pre-wrap">' + escHtml(reportText) + '</pre>'
+    + (dataUrl ? '<img src="' + dataUrl + '" alt="Session timeline graph" style="max-width:100%">' : '');
+
+  const items = {
+    'text/plain': new Blob([reportText], { type: 'text/plain' }),
+    'text/html': new Blob([html], { type: 'text/html' }),
+  };
+  if (dataUrl) {
+    // ClipboardItem accepts a Promise for a representation — lets us hand
+    // off the async toBlob() while still constructing/writing the
+    // ClipboardItem synchronously within the click handler, which some
+    // browsers (Safari in particular) require for clipboard writes.
+    items['image/png'] = new Promise(resolve => canvas.toBlob(blob => resolve(blob), 'image/png'));
+  }
+
+  navigator.clipboard.write([new ClipboardItem(items)])
+    .then(() => showToast(dataUrl ? '\u2705 Text + report + graph copied — paste with Ctrl+V / Cmd+V' : plainMsg))
+    .catch((err) => { debugLog('copy+report: clipboard.write failed — ' + err + ' — falling back to text only'); doCopy(reportText, plainMsg); });
+}
 
 function showToast(msg) {
   const t = document.getElementById('toast'); t.textContent = msg; t.style.display = 'block';
@@ -5611,7 +5870,8 @@ function downloadCSV() {
   const sugg = sess.log.filter(e => e.how === 'suggestion').length;
   const spell = sess.log.filter(e => e.how === 'corrected').length;
   const typed = sess.log.filter(e => e.how === 'typed').length;
-  const rate = sess.log.length > 0 ? Math.round((sugg+spell)/sess.log.length*100) + '%' : '0%';
+  const voice = sess.log.filter(e => e.how === 'dictated').length;
+  const rate = sess.log.length > 0 ? Math.round((sugg+spell+voice)/sess.log.length*100) + '%' : '0%';
   const date = new Date().toLocaleDateString('en-AU', {day:'2-digit',month:'short',year:'numeric'});
   let csv = 'WORD HELPER — SESSION REPORT\n\n';
   csv += 'Student,' + name + '\n'; csv += 'Date,' + date + '\n';
@@ -5626,6 +5886,7 @@ function downloadCSV() {
   csv += 'Total words written,' + wc + '\n';
   csv += 'Words from suggestions,' + sugg + '\n';
   csv += 'From spell corrections,' + spell + '\n';
+  csv += 'From voice dictation,' + voice + '\n';
   csv += 'Words typed manually,' + typed + '\n';
   csv += 'Assistance rate,' + rate + '\n';
   const insC = calcInsightStats();
@@ -5646,6 +5907,183 @@ function downloadCSV() {
   const a = document.createElement('a'); a.href = url;
   a.download = (name.replace(/\s+/g,'-')||'student') + '-word-helper-' + date.replace(/\s/g,'-') + '.csv';
   a.click(); URL.revokeObjectURL(url);
+}
+// ── Speech-to-text (dictation) ──
+// Uses the browser's built-in Web Speech API (SpeechRecognition). Chrome/Edge
+// and Safari support it (Chrome/Edge still require the webkit-prefixed
+// constructor); Firefox does not ship it, so the button hides itself when
+// unsupported. Requires a secure context (https:, or file:/localhost) and
+// mic permission, which the browser prompts for on first use.
+//
+// UX: press-and-hold. While held, recognized speech accumulates in a fixed-size
+// scrolling caption box next to the button — it is NOT written into the editor
+// yet, so nothing in the document resizes or shifts while the student is still
+// talking. On release, the whole accumulated sentence is inserted at once.
+const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+const micBtn = document.getElementById('mic-btn');
+const dictationStatusText = document.getElementById('dictation-status-text');
+let recognition = null;
+let dictating = false;
+let dictationFinal = '';   // accumulated finalized transcript for the current hold
+let dictationInterim = ''; // latest not-yet-final chunk (still being recognized)
+
+function speechToTextSupported() { return !!SpeechRecognitionCtor; }
+
+function initRecognition() {
+  if (!SpeechRecognitionCtor || recognition) return recognition;
+  recognition = new SpeechRecognitionCtor();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = 'en-AU';
+
+  recognition.onresult = (e) => {
+    let interimChunk = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const r = e.results[i];
+      if (r.isFinal) dictationFinal += (dictationFinal ? ' ' : '') + r[0].transcript.trim();
+      else interimChunk += r[0].transcript;
+    }
+    dictationInterim = interimChunk.trim();
+    updateDictationPreview();
+    recordActivity(); // keep the writing-time timer alive while talking
+  };
+
+  recognition.onerror = (e) => {
+    debugLog('speech recognition error: ' + e.error);
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      showToast('Microphone access was blocked — allow it in your browser to use dictation.');
+      dictating = false;
+      if (micBtn) { micBtn.classList.remove('listening'); micBtn.setAttribute('aria-pressed', 'false'); }
+    } else if (e.error === 'no-speech' || e.error === 'aborted') {
+      // benign — no-speech happens on silence, aborted happens on our own stop()
+    } else {
+      showToast('Dictation error: ' + e.error);
+    }
+  };
+
+  recognition.onend = () => {
+    if (dictating) {
+      // Browser auto-stopped (e.g. long silence) but the button is still
+      // held — keep the session going transparently, buffer stays intact.
+      try { recognition.start(); } catch (err) { /* already starting */ }
+    } else {
+      commitDictation();
+    }
+  };
+
+  return recognition;
+}
+
+function updateDictationPreview() {
+  if (!dictationStatusText) return;
+  const full = (dictationFinal + ' ' + dictationInterim).trim();
+  dictationStatusText.textContent = full;
+  // Auto-scroll so the most recently spoken words stay in view without the
+  // box itself ever growing.
+  dictationStatusText.scrollLeft = dictationStatusText.scrollWidth;
+}
+
+function startDictation() {
+  if (!speechToTextSupported() || dictating || !micBtn) return;
+  if (editor.contentEditable !== 'true') { showToast('Please type your name before dictating.'); return; }
+  resumeIfPaused();
+  const rec = initRecognition();
+  if (!rec) return;
+  dictating = true;
+  dictationFinal = '';
+  dictationInterim = '';
+  updateDictationPreview();
+  micBtn.classList.add('listening');
+  micBtn.setAttribute('aria-pressed', 'true');
+  debugLog('dictation: start');
+  try { rec.start(); } catch (err) { /* already started */ }
+  recordActivity();
+}
+
+function stopDictation() {
+  if (!dictating) return;
+  dictating = false;
+  debugLog('dictation: stop');
+  if (micBtn) { micBtn.classList.remove('listening'); micBtn.setAttribute('aria-pressed', 'false'); }
+  // The actual commit happens in onend (fires once the engine flushes the
+  // tail of what it just heard). Fall back to an immediate commit if the
+  // engine was never actually running.
+  if (recognition) { try { recognition.stop(); } catch (err) { commitDictation(); } }
+  else commitDictation();
+}
+
+function abortDictation() {
+  // Used when the session itself is being reset (e.g. "New session") —
+  // discard whatever was mid-recognition rather than committing it into
+  // the editor we're about to clear.
+  dictating = false;
+  dictationFinal = '';
+  dictationInterim = '';
+  updateDictationPreview();
+  if (micBtn) { micBtn.classList.remove('listening'); micBtn.setAttribute('aria-pressed', 'false'); }
+  if (recognition) { try { recognition.abort(); } catch (err) {} }
+}
+
+function commitDictation() {
+  const text = (dictationFinal + ' ' + dictationInterim).trim();
+  dictationFinal = '';
+  dictationInterim = '';
+  updateDictationPreview();
+  if (text) insertDictatedText(text);
+}
+
+function insertDictatedText(rawText) {
+  const text = rawText.trim();
+  if (!text) return;
+  editor.focus();
+  const sel = window.getSelection();
+  if (!sel.rangeCount) placeCaretAtEnd();
+  const sel2 = window.getSelection();
+  const range = sel2.getRangeAt(0);
+
+  const before = getBeforeCaret();
+  const needsLeadingSpace = before.length > 0 && !/\s$/.test(before);
+  const insertText = (needsLeadingSpace ? ' ' : '') + text + ' ';
+
+  range.deleteContents();
+  const tn = document.createTextNode(insertText);
+  range.insertNode(tn);
+  const cur = document.createRange();
+  cur.setStartAfter(tn); cur.collapse(true);
+  sel2.removeAllRanges(); sel2.addRange(cur);
+
+  // Log each recognized word for stats, same as a typed/pasted phrase
+  const words = text.split(/\s+/).filter(Boolean);
+  words.forEach(w => {
+    const clean = w.replace(/[^a-zA-Z'’-]/g, '');
+    if (clean.length > 0) logWord(clean, 'dictated');
+  });
+  prevText = getBeforeCaret();
+  wordTypedChars = 0;
+  recordActivity();
+  if (assistOn()) scheduleSpellPass();
+}
+
+if (micBtn) {
+  if (!speechToTextSupported()) {
+    micBtn.classList.add('unsupported');
+    micBtn.title = 'Speech-to-text isn’t supported in this browser';
+  } else {
+    const start = (e) => { e.preventDefault(); startDictation(); };
+    const stop = (e) => { if (e) e.preventDefault(); stopDictation(); };
+    micBtn.addEventListener('mousedown', start);
+    micBtn.addEventListener('touchstart', start, { passive: false });
+    document.addEventListener('mouseup', stop);
+    document.addEventListener('touchend', stop);
+    document.addEventListener('touchcancel', stop);
+    micBtn.addEventListener('keydown', (e) => {
+      if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); startDictation(); }
+    });
+    micBtn.addEventListener('keyup', (e) => {
+      if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); stopDictation(); }
+    });
+    micBtn.addEventListener('blur', () => { if (dictating) stopDictation(); });
+  }
 }
 </script>
 </body>
