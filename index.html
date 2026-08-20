@@ -5114,7 +5114,7 @@ function showDD(words, prefix, mode) {
     item.className = 'drop-item'; item.setAttribute('role', 'option');
     const sb = document.createElement('span');
     sb.className = 'speak-dot'; sb.setAttribute('aria-label', 'Hear ' + word); sb.textContent = '🔊';
-    sb.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); speak(word, sb); recordListen(word); });
+    sb.addEventListener('pointerup', e => { e.stopPropagation(); speak(word, sb); recordListen(word); });
     const lbl = document.createElement('span');
     lbl.style.flex = '1';
     lbl.innerHTML = '<span class="typed-part">' + escHtml(word.slice(0, prefix.length)) + '</span>'
@@ -5122,11 +5122,17 @@ function showDD(words, prefix, mode) {
     const db = document.createElement('span');
     db.className = 'def-dot'; db.textContent = '?';
     db.setAttribute('aria-label', 'Hear definition of ' + word);
-    db.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); speakDefinition(word, null, db); recordDefinition(word); });
+    db.addEventListener('pointerup', e => { e.stopPropagation(); speakDefinition(word, null, db); recordDefinition(word); });
     item.appendChild(sb); item.appendChild(lbl); item.appendChild(db);
-    item.addEventListener('mousedown', e => {
+    // Use pointerup (fires uniformly for mouse, touch, and pen) rather than
+    // mousedown — iOS Safari suppresses the synthetic mousedown/click that
+    // would otherwise follow a touch tap here, because the dropdown container
+    // already calls preventDefault() on pointerdown (above) to stop the
+    // editor losing focus. pointerup is unaffected by that suppression, and
+    // matches the pattern already used for the spell-check dropdown items.
+    item.addEventListener('pointerup', e => {
       if (e.target === item || e.target === lbl || e.target.parentElement === lbl) {
-        e.preventDefault(); insertWord(word, 'suggestion');
+        insertWord(word, 'suggestion');
       }
     });
     frag.appendChild(item);
