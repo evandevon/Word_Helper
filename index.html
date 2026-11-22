@@ -42,6 +42,7 @@ input[type=text]:focus{border-color:#1D9E75;box-shadow:0 0 0 2px rgba(93,202,165
 .def-dot{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;flex-shrink:0;margin-left:auto;background:#EEF5FD;color:#185FA5;font-size:13px;font-weight:700;border:1px solid #85B7EB;cursor:pointer;transition:background 0.1s}
 .def-dot:hover{background:#dce9f8}
 .drop-unknown{padding:10px 14px;font-size:14px;color:#888;font-style:italic}
+.drop-more{justify-content:center;font-size:15px;font-style:italic;opacity:0.8;border-top:1px solid rgba(128,128,128,0.25);margin-top:3px;border-radius:0 0 8px 8px}
 .drop-header{padding:4px 10px 2px;font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:0.05em}
 #controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:0.9rem;align-items:center}
 .btn-divider{width:1px;height:28px;background:#ddd;margin:0 4px;flex-shrink:0}
@@ -1401,7 +1402,16 @@ function getWordAtPoint(x, y) {
 // Rules are ordered longest-match first to avoid partial matches corrupting longer ones.
 // e.g. "sed"→"said", "fone"→"phone", "nite"→"night", "wen"→"when"
 function phonemeVariants(w) {
-  const variants = new Set([w]);
+  // variant → how many sound changes it took to get there. Callers only
+  // check the first so many variants, so they're returned fewest-changes
+  // first: one-change guesses are never crowded out by long chains.
+  const variants = new Map([[w, 0]]);
+
+  // Word endings children often write for "-ly": "-le", "-lee", "-li"
+  // (nale → naly → nearly, sloli → slowly, sadlee → sadly). Endings only, and
+  // added first so they're never crowded out by the substitutions below.
+  const lyEnding = w.match(/^(.{2,})(lee|li|le)$/);
+  if (lyEnding) variants.set(lyEnding[1] + 'ly', 1);
 
   // Ordered longest-first so multi-char patterns match before their sub-patterns
   const subs = [
@@ -1426,6 +1436,7 @@ function phonemeVariants(w) {
     ['ck', ['k','c']],                     // back→bak
     ['k',  ['c','ck']],                    // bak→back
     ['qu', ['kw','k']],                    // queen→kween
+    ['kw', ['qu']],                        // kween→queen, kwikli→quickly
     ['th', ['t','d','f']],                 // that→dat, with→wif
     ['sh', ['ch','s']],
     ['ch', ['k','sh','tch']],
@@ -1504,7 +1515,8 @@ function phonemeVariants(w) {
     ['er',  ['ur','ir','a']],              // girl→gerl, bird→berd ✓
     ['ir',  ['er','ur','ea']],             // bird→berd ✓
     ['ur',  ['er','ir']],                  // hurt→hert ✓
-    ['ar',  ['er','a']],                   // sugar→suger
+    ['ar',  ['er','a','ear']],             // sugar→suger, hart→heart
+    ['al',  ['eal']],                      // the "ear" sound with no r: naly→nealy→nearly
 
     // ── 2-char patterns ──
     ['ee', ['ea','ie','ey','ei','e']],
@@ -1580,17 +1592,19 @@ function phonemeVariants(w) {
   for (const [from, tos] of subs) {
     const current = [...variants];
     if (variants.size >= MAX_VARIANTS) break;
-    for (const variant of current) {
+    for (const [variant, depth] of current) {
       let idx = variant.indexOf(from);
       while (idx !== -1 && variants.size < MAX_VARIANTS) {
         for (const to of tos) {
-          variants.add(variant.slice(0, idx) + to + variant.slice(idx + from.length));
+          const v = variant.slice(0, idx) + to + variant.slice(idx + from.length);
+          if (!variants.has(v)) variants.set(v, depth + 1);
         }
         idx = variant.indexOf(from, idx + from.length);
       }
     }
   }
-  return [...variants];
+  // Fewest changes first (sort is stable, so table order breaks ties).
+  return [...variants.entries()].sort((a, b) => a[1] - b[1]).map(e => e[0]);
 }
 
 // Single letters that kids commonly type as shorthand for a whole word
@@ -1604,13 +1618,16 @@ const LETTER_HOMOPHONES = {
   o: ['oh'], p: ['pee', 'pea'], s: ['is'], t: ['tea'], u: ['you'],
 };
 
-function getSpellSuggestionsAsync(word, callback) {
+// exclude (optional): lower-case words already shown, for "None of these".
+function getSpellSuggestionsAsync(word, callback, exclude) {
+  exclude = exclude || new Set();
   const w = word.toLowerCase().replace(/[^a-z']/g, '');
   if (!w) { callback(null); return; }
 
   if (w.length === 1) {
     const homophones = LETTER_HOMOPHONES[w];
-    callback(homophones ? homophones.map(hw => ({ word: hw, def: null })) : null);
+    const left = homophones ? homophones.filter(hw => !exclude.has(hw)) : [];
+    callback(left.length ? left.map(hw => ({ word: hw, def: null })) : null);
     return;
   }
 
@@ -1637,7 +1654,7 @@ function getSpellSuggestionsAsync(word, callback) {
   // This reduces O(400 × 3700) to O(30 × ~150) — ~30× faster.
   const prunedVariants = [...allVariants].filter(v =>
     v !== w && Math.abs(v.length - w.length) <= 2 && v.length >= 2
-  ).slice(0, 40); // cap at 40 variants
+  ).slice(0, 40); // cap at 40 variants (fewest sound changes first)
 
   // Build a first-letter index and case-lookup map (built once, cached)
   if (!getSpellSuggestionsAsync._wordIndex) {
@@ -1665,6 +1682,9 @@ function getSpellSuggestionsAsync(word, callback) {
       if (phoneticBonus.has(cl)) continue;
       if (isBlocked(cl)) continue;
       if (cl.length < vlen - 1 || cl.length > vlen + 1) continue;
+      // A variant that changed the first letter (nale → knale) must keep that
+      // new spelling in the real word (knife, not koala).
+      if (cl[0] !== w[0] && cl.slice(0, 2) !== variant.slice(0, 2)) continue;
       if (levenshtein(variant, cl) <= 1) phoneticBonus.add(cl);
     }
   }
@@ -1699,7 +1719,8 @@ function getSpellSuggestionsAsync(word, callback) {
   }
 
   // Datamuse phonetic query
-  lookupFetch('https://api.datamuse.com/words?sp=' + encodeURIComponent(w) + '&max=15&md=f')
+  // Ask for more when earlier suggestions are being left out.
+  lookupFetch('https://api.datamuse.com/words?sp=' + encodeURIComponent(w) + '&max=' + Math.min(50, 15 + exclude.size * 2) + '&md=f')
     .then(r => r.json())
     .then(data => {
       const seen = new Set();
@@ -1776,7 +1797,7 @@ function getSpellSuggestionsAsync(word, callback) {
             - lenPenalty(dl, w) });
       });
       results.sort((a, b) => b.score - a.score);
-      const final = results.filter(r => r.word.toLowerCase() !== w).slice(0, 7).map(r => ({ word: r.word, def: r.def }));
+      const final = results.filter(r => r.word.toLowerCase() !== w && !exclude.has(r.word.toLowerCase())).slice(0, 7).map(r => ({ word: r.word, def: r.def }));
       callback(final.length ? final : null);
     })
     .catch(() => {
@@ -1786,7 +1807,7 @@ function getSpellSuggestionsAsync(word, callback) {
       // just happen to also be nearby edits (see "sed"→"said" vs "sad"/"say"/etc).
       const lenGap = (word) => Math.max(0, Math.abs(word.length - w.length) - 1);
       localCands.sort((a, b) => a.dist - b.dist || lenGap(a.word) - lenGap(b.word));
-      const final = localCands.filter(c => c.word.toLowerCase() !== w).slice(0, 7).map(c => ({ word: c.word, def: null }));
+      const final = localCands.filter(c => c.word.toLowerCase() !== w && !exclude.has(c.word.toLowerCase())).slice(0, 7).map(c => ({ word: c.word, def: null }));
       callback(final.length ? final : null);
     });
 }
@@ -5156,6 +5177,9 @@ function showSpellDD(wordInfo) {
     applyModeToDD(); posDD(null); dropdown.style.display = 'block';
   }
 
+  // Every word shown so far for this word, so "None of these" never repeats one.
+  const shownSoFar = new Set();
+
   function showResults(suggestions, headerText, unknownText) {
     curSugg = suggestions || [];
     dropdown.innerHTML = '';
@@ -5168,9 +5192,32 @@ function showSpellDD(wordInfo) {
       hdr.className = 'drop-header';
       hdr.textContent = headerText;
       dropdown.appendChild(hdr);
-      suggestions.forEach(s => dropdown.appendChild(makeSuggItem(s)));
+      suggestions.forEach(s => {
+        shownSoFar.add((typeof s === 'string' ? s : s.word).toLowerCase());
+        dropdown.appendChild(makeSuggItem(s));
+      });
+      dropdown.appendChild(makeNoneItem());
     }
     applyModeToDD(); posDD(null); dropdown.style.display = 'block';
+  }
+
+  // "None of these": another (up to) 7 ideas, leaving out every word shown so far.
+  function makeNoneItem() {
+    const more = document.createElement('div');
+    more.className = 'drop-item drop-more';
+    more.setAttribute('role', 'button');
+    more.textContent = '\uD83D\uDD04 None of these';
+    more.addEventListener('pointerup', e => {
+      e.stopPropagation();
+      debugLog('none of these: "' + word + '" (' + shownSoFar.size + ' shown so far)');
+      showLoading('\u23f3 Finding more ideas for \u201c' + word + '\u201d\u2026');
+      getSpellSuggestionsAsync(word, next => {
+        if (dropMode !== 'spell') return; // closed while looking
+        showResults(next, 'More ideas for \u201c' + word + '\u201d',
+          '\u2753 No more ideas for \u201c' + word + '\u201d. Try sounding it out again, or ask your teacher!');
+      }, new Set(shownSoFar));
+    });
+    return more;
   }
 
   if (inWordSet || (!wordInfo.span)) {
@@ -5503,6 +5550,9 @@ editor.addEventListener('paste', e => {
 
 editor.addEventListener('input', () => {
   if (pasteActive) return; // paste handler deals with it
+  // Typing means the student has moved on from an open corrections menu.
+  // Close it, so spell checking (paused while it's open) carries on.
+  if (dropMode === 'spell' && dropdown.style.display === 'block') hideDD('typing');
   resumeIfPaused(); // typing auto-resumes a paused session
   recordActivity();
   const text = getBeforeCaret();
