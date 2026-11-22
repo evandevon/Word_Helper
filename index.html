@@ -89,7 +89,31 @@ input[type=text]:focus{border-color:#1D9E75;box-shadow:0 0 0 2px rgba(93,202,165
 #dictation-status-text{overflow-x:auto;white-space:nowrap;width:100%;scrollbar-width:none}
 #dictation-status-text::-webkit-scrollbar{display:none}
 #dictation-status-text:empty::before{content:"Hold the mic button and start talking…";color:#c79ab0}
-#toast{display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a1a1a;color:#fff;font-size:13px;padding:10px 20px;border-radius:24px;z-index:9999;white-space:nowrap}
+#toast{display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a1a1a;color:#fff;font-size:13px;padding:10px 20px;border-radius:24px;z-index:10001;max-width:min(90vw,560px);width:max-content;text-align:center;line-height:1.4}
+.btn[hidden]{display:none}
+/* Settings panel */
+#settings-panel{background:#fff;border:1px solid #e0e0e0;border-radius:12px;margin-bottom:0.5rem;overflow:hidden}
+#settings-toggle{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:pointer;user-select:none;font-size:13px;font-weight:600;color:#555;letter-spacing:0.03em;text-transform:uppercase}
+#settings-toggle:hover{background:#fafafa}
+#settings-arrow{font-size:12px;transition:transform 0.2s;display:inline-block}
+#settings-arrow.open{transform:rotate(180deg)}
+#settings-body{display:none;padding:0 1rem 1rem}
+#settings-body.open{display:block}
+.set-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 0;border-top:1px solid #f0f0f0;font-size:14px;color:#1a1a1a}
+.set-row input[type=checkbox]{width:18px;height:18px;accent-color:#1D9E75;flex-shrink:0;align-self:flex-start;margin-top:2px}
+.set-row small{display:block;font-size:12px;color:#777;margin-top:2px}
+.set-row > span{flex:1;min-width:0}
+label.set-row{flex-wrap:nowrap;cursor:pointer}
+#teacher-status{font-size:13px;color:#555;margin-top:2px}
+/* Class QR code scanner */
+#scanner{position:fixed;inset:0;z-index:10000;background:#000;display:flex;flex-direction:column}
+#scanner[hidden]{display:none}
+#scanner-video{flex:1;min-height:0;width:100%;object-fit:cover}
+.scanner-frame{position:absolute;top:40%;left:50%;width:min(60vw,60vh,320px);aspect-ratio:1;transform:translate(-50%,-50%);border:4px solid rgba(255,255,255,0.9);border-radius:18px;box-shadow:0 0 0 100vmax rgba(0,0,0,0.35);pointer-events:none}
+.scanner-bottom{position:relative;z-index:1;background:#111;color:#fff;padding:14px 16px calc(14px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:10px;align-items:center}
+#scanner-msg{font-size:15px;text-align:center;min-height:1.4em}
+.scanner-tools{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;width:100%;max-width:520px}
+#scanner-link{flex:1;min-width:160px;font-size:15px;padding:8px 10px;border-radius:8px;border:1px solid #555;background:#222;color:#fff}
 #hint{font-size:12px;color:#bbb;margin-top:6px}
 #debug-wrap{margin-top:10px;border-radius:8px;overflow:hidden;border:1px solid #ddd}
 #debug-toggle{display:flex;align-items:center;justify-content:space-between;padding:7px 12px;background:#f5f5f5;cursor:pointer;user-select:none;font-size:12px;color:#888}
@@ -120,7 +144,8 @@ input[type=text]:focus{border-color:#1D9E75;box-shadow:0 0 0 2px rgba(93,202,165
     <label for="sname" id="name-label" style="font-weight:600;color:#993C1D;font-size:13px;white-space:nowrap">&#9733; Name:</label>
     <input id="sname" type="text" placeholder="Type your name first…"
            style="flex:1;min-width:80px;max-width:160px;border-color:#F0997B;background:#fdf3f0;font-weight:500"
-           oninput="onNameInput()" onblur="onNameBlur()" autocomplete="off">
+           oninput="onNameInput()" onblur="onNameBlur()" autocomplete="off"
+           autocorrect="off" autocapitalize="words" spellcheck="false" maxlength="80">
     <button id="voice-toggle" onclick="toggleVoice()">🔊 Female</button>
     <label style="display:flex;align-items:center;gap:5px;font-size:13px;color:#555;cursor:pointer;white-space:nowrap">
       <input type="checkbox" id="assist-toggle" checked onchange="toggleAssist()" style="width:15px;height:15px;accent-color:#1D9E75;cursor:pointer">
@@ -138,6 +163,7 @@ input[type=text]:focus{border-color:#1D9E75;box-shadow:0 0 0 2px rgba(93,202,165
 
   <div id="editor-wrap">
     <div id="editor" contenteditable="false" spellcheck="false"
+         autocorrect="off" autocapitalize="sentences" autocomplete="off"
          data-placeholder="Type your name above first&hellip;"
          role="textbox" aria-label="Typing area" aria-multiline="true"
          style="opacity:0.45;cursor:not-allowed;background:#f5f7fa"></div>
@@ -148,6 +174,7 @@ input[type=text]:focus{border-color:#1D9E75;box-shadow:0 0 0 2px rgba(93,202,165
     <button class="btn btn-purple" onclick="copyText()">&#128203; Copy text</button>
     <button class="btn btn-purple" onclick="copyTextAndReport()">&#128203; Copy + report</button>
     <button class="btn btn-blue" onclick="downloadCSV()">&#8595; Download report</button>
+    <button class="btn btn-green" id="send-teacher-btn" type="button" onclick="sendToTeacher()" hidden>&#128228; Send to teacher</button>
     <span class="btn-divider"></span>
     <button class="btn" id="pause-btn" onclick="togglePause()">&#9646;&#9646; Pause session</button>
     <button class="btn btn-red" onclick="clearAll()">&#10006; New session</button>
@@ -214,6 +241,30 @@ input[type=text]:focus{border-color:#1D9E75;box-shadow:0 0 0 2px rgba(93,202,165
       </div>
     </div>
   </div>
+  <div id="settings-panel">
+    <div id="settings-toggle" onclick="toggleSettings()" role="button" aria-expanded="false">
+      <span>&#9881;&#65039; Settings</span>
+      <span id="settings-arrow">&#9660;</span>
+    </div>
+    <div id="settings-body">
+      <label class="set-row">
+        <input type="checkbox" id="online-lookups" checked onchange="setOnlineLookups(this.checked)">
+        <span>Look up unusual words online
+          <small>Only the single word is sent (to Datamuse and the Free Dictionary), never your name or writing. When off, Word Helper uses its built-in word list.</small>
+        </span>
+      </label>
+      <div class="set-row set-teacher">
+        <div style="flex:1;min-width:0">
+          <strong>Send to teacher</strong>
+          <div id="teacher-status">Not connected</div>
+          <small>Uses the same class QR code as PagePal.</small>
+        </div>
+        <button class="btn btn-green" id="connect-teacher-btn" type="button" onclick="openTeacherScanner()">&#128247; Connect to my teacher</button>
+        <button class="btn btn-red" id="disconnect-teacher-btn" type="button" onclick="disconnectTeacher()" hidden>Disconnect</button>
+      </div>
+    </div>
+  </div>
+
   <div id="hint">Tip: arrow keys to browse &middot; Tab or Enter to select &middot; Esc to close &middot; Click any word for alternatives &middot; click misspelled words for corrections</div>
 
   <div id="debug-wrap">
@@ -230,7 +281,25 @@ input[type=text]:focus{border-color:#1D9E75;box-shadow:0 0 0 2px rgba(93,202,165
 </div>
 
 <div id="dropdown" role="listbox"></div>
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<!-- ── Send to teacher: class QR code scanner ── -->
+<div id="scanner" hidden role="dialog" aria-modal="true" aria-label="Scan your class QR code">
+  <video id="scanner-video" muted playsinline></video>
+  <div class="scanner-frame" aria-hidden="true"></div>
+  <div class="scanner-bottom">
+    <p id="scanner-msg" role="status" aria-live="polite"></p>
+    <div class="scanner-tools">
+      <label class="btn">&#128444;&#65039; Choose a photo<input id="scanner-photo" type="file" accept="image/*" hidden></label>
+      <button class="btn" id="scanner-cancel" type="button">Cancel</button>
+    </div>
+    <form id="scanner-paste" class="scanner-tools" autocomplete="off">
+      <input id="scanner-link" type="url" placeholder="…or paste the class link here" aria-label="Class link"
+             autocorrect="off" autocapitalize="off" spellcheck="false">
+      <button class="btn btn-green" type="submit">Connect</button>
+    </form>
+  </div>
+</div>
 
 <script>
 const MODES = {
@@ -402,6 +471,46 @@ function copyDebug() {
     document.execCommand('copy'); document.body.removeChild(ta);
     document.getElementById('debug-copy').textContent = '✅ Copied!';
   });
+}
+
+// ── Settings (this browser only) ──
+// Word Helper's own settings live under their own key. The teacher
+// connection is shared with PagePal instead — see "Send to teacher" below.
+const WH_SETTINGS_KEY = 'wordhelper.settings';
+function loadWHSettings() {
+  try { return JSON.parse(localStorage.getItem(WH_SETTINGS_KEY)) || {}; } catch (e) { return {}; }
+}
+function saveWHSetting(name, value) {
+  const s = loadWHSettings();
+  s[name] = value;
+  try { localStorage.setItem(WH_SETTINGS_KEY, JSON.stringify(s)); } catch (e) { /* private mode or storage full */ }
+}
+let onlineLookups = loadWHSettings().onlineLookups !== false; // default on
+
+function setOnlineLookups(on) {
+  onlineLookups = !!on;
+  saveWHSetting('onlineLookups', onlineLookups);
+  // Words judged with or without the online check shouldn't stay cached
+  // the other way.
+  verifiedWords.clear(); rejectedWords.clear();
+  if (assistOn()) scheduleSpellPass();
+}
+
+function toggleSettings() {
+  const body = document.getElementById('settings-body');
+  const open = body.classList.toggle('open');
+  document.getElementById('settings-arrow').classList.toggle('open', open);
+  document.getElementById('settings-toggle').setAttribute('aria-expanded', open);
+}
+
+// Every online word lookup (Datamuse, dictionaryapi.dev) goes through here.
+// Only ever pass a URL built from a single word: never a name or a sentence.
+// No cookies and no Referer are sent. When "Look up unusual words online" is
+// off this rejects straight away, so each caller's existing offline fallback
+// (its .catch) runs instead.
+function lookupFetch(url) {
+  if (!onlineLookups) return Promise.reject(new Error('online lookups are off'));
+  return fetch(url, { credentials: 'omit', referrerPolicy: 'no-referrer' });
 }
 
 // ── Voice — simplified male/female only ──
@@ -616,7 +725,7 @@ function verifyWordWithDatamuse(word) {
   // common). Two unrelated real words of different everyday-ness never
   // differ anywhere near that much (e.g. "lived" 64/million vs "live"
   // 101/million; "jelly" 2.2/million vs "belly" 6.3/million).
-  fetch('https://api.datamuse.com/words?sp=' + encodeURIComponent(word) + '&max=10&md=f')
+  lookupFetch('https://api.datamuse.com/words?sp=' + encodeURIComponent(word) + '&max=10&md=f')
     .then(r => r.json())
     .then(data => {
       pendingWords.delete(word);
@@ -966,6 +1075,21 @@ function getTotalSecs() {
   return sess.start ? Math.floor((Date.now() - sess.start - totalPausedMs - (sessionPaused && pauseStart ? Date.now() - pauseStart : 0)) / 1000) : 0;
 }
 
+// How words got into the writing. Assistance rate = share of entered words
+// (typed + dictated + suggestion + corrected) that were dictated, picked from
+// a suggestion or spell-corrected — the same sum PagePal uses. Listen and
+// definition log entries aren't words entered, so they don't count.
+function entryCounts() {
+  const count = how => sess.log.filter(e => e.how === how).length;
+  const typed = count('typed'), dictated = count('dictated');
+  const suggestion = count('suggestion'), corrected = count('corrected');
+  const entered = typed + dictated + suggestion + corrected;
+  return {
+    typed, dictated, suggestion, corrected,
+    assistanceRate: entered ? Math.round((dictated + suggestion + corrected) / entered * 100) : null,
+  };
+}
+
 function refreshStats() {
   const wSecs = getWritingSecs();
   const tSecs = getTotalSecs();
@@ -984,8 +1108,8 @@ function refreshStats() {
   document.getElementById('s-spell').textContent = spell;
   document.getElementById('s-voice').textContent = voice;
   document.getElementById('s-typed').textContent = typed;
-  const total = sess.log.length;
-  document.getElementById('s-rate').textContent = total > 0 ? Math.round((sugg+spell+voice)/total*100) + '%' : '—';
+  const rate = entryCounts().assistanceRate;
+  document.getElementById('s-rate').textContent = rate !== null ? rate + '%' : '—';
   // ── TTR, WPM, connectives ──
   const rawText = editor.innerText.trim();
   const allWords = rawText ? rawText.toLowerCase().split(/\s+/).filter(w => /[a-z]/.test(w)) : [];
@@ -1571,7 +1695,7 @@ function getSpellSuggestionsAsync(word, callback) {
   }
 
   // Datamuse phonetic query
-  fetch('https://api.datamuse.com/words?sp=' + encodeURIComponent(w) + '&max=15&md=f')
+  lookupFetch('https://api.datamuse.com/words?sp=' + encodeURIComponent(w) + '&max=15&md=f')
     .then(r => r.json())
     .then(data => {
       const seen = new Set();
@@ -4844,19 +4968,42 @@ const LOCAL_DEFS = {
   "zoom":"To move very fast, or to make a picture look bigger"
 };
 
+// A built-in definition that was cut short when the list was made: more "("
+// than ")", ending on a dictionary abbreviation ("part", "usu", "foll"…), or
+// too short to be a real definition once tidied.
+const DEF_ABBR_END = /\b(part|usu|foll|esp|etc|colloq|abbr|orig|freq|incl|attrib|var|pl|sing|absol)\.?$/i;
+function isCutDef(def) {
+  const t = String(def || '').replace(/\s+/g, ' ').trim().replace(/[\s,;:.]+$/, '');
+  const opens = (t.match(/\(/g) || []).length, closes = (t.match(/\)/g) || []).length;
+  return opens > closes || DEF_ABBR_END.test(t) || t.length < 12;
+}
+
+// Best-effort tidy of a cut definition, used only when the online lookup
+// fails: drop an unfinished "(…" tail and trailing commas, capitalise.
+// Returns null if what's left still isn't a usable sentence.
+function tidyCutDef(def) {
+  let t = String(def || '').replace(/\s+/g, ' ').trim();
+  const open = t.lastIndexOf('(');
+  if (open >= 0 && t.indexOf(')', open) < 0) t = t.slice(0, open);
+  t = t.replace(/[\s,;:.\-\u2014]+$/, '').trim();
+  if (!t) return null;
+  if (DEF_ABBR_END.test(t) || /\b(and|or|of)$/i.test(t)) return null;
+  if (/[*=&\u2014]/.test(t)) return null; // dictionary cross-reference marks, not words
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
 function fetchFreeDictDef(word, callback) {
-  // Check local definitions first for common words
+  // Built-in definitions first. A cut-short one is only used if the online
+  // lookup can't do better (see isCutDef/tidyCutDef).
   const local = LOCAL_DEFS[word.toLowerCase()];
-  if (local) { callback(local); return; }
+  if (local && !isCutDef(local)) { callback(local); return; }
+  const fallback = local ? tidyCutDef(local) : null;
+  const done = text => callback(text || fallback || null);
 
-
-  fetch('https://api.dictionaryapi.dev/api/v2/entries/en/' + encodeURIComponent(word))
-    .then(r => {
-      if (!r.ok) { callback(null); return; }
-      return r.json();
-    })
+  lookupFetch('https://api.dictionaryapi.dev/api/v2/entries/en/' + encodeURIComponent(word))
+    .then(r => (r.ok ? r.json() : null))
     .then(data => {
-      if (!data || !data.length) { callback(null); return; }
+      if (!data || !data.length) { done(null); return; }
 
       // Filter out specialised/technical definitions but preserve API order.
       // The Free Dictionary API lists definitions most-common-first within
@@ -4877,17 +5024,34 @@ function fetchFreeDictDef(word, callback) {
             const text = (def.definition || '').trim();
             if (!text || text.length > 150 || text.startsWith('(')) continue;
             if (techTerms.test(text)) continue;
-            callback(text);
+            done(text);
             return;
           }
         }
       }
-      callback(null);
+      done(null);
     })
-    .catch(() => callback(null));
+    .catch(() => done(null));
+}
+
+// iPad Safari only lets speech start as a direct response to a tap. A
+// definition is often spoken after a network lookup, by which time the tap
+// no longer counts and Safari silently blocks it. Speaking one silent
+// utterance during the tap "unlocks" speech for the rest of the visit.
+let speechUnlocked = false;
+function unlockSpeech() {
+  if (speechUnlocked || !window.speechSynthesis) return;
+  speechUnlocked = true;
+  try {
+    const u = new SpeechSynthesisUtterance(' ');
+    u.volume = 0;
+    speechSynthesis.speak(u);
+  } catch (e) { /* speech not available */ }
 }
 
 function speakDefinition(word, def, btn) {
+  // Called straight from the ? tap handler: unlock speech before any waiting.
+  unlockSpeech();
   // def here is from Datamuse (legacy) — ignore it and always use Free Dictionary
   // for consistency and quality
   const orig = btn.textContent;
@@ -5592,7 +5756,8 @@ function buildReportText() {
   const spell = sess.log.filter(e => e.how === 'corrected').length;
   const typed = sess.log.filter(e => e.how === 'typed').length;
   const voice = sess.log.filter(e => e.how === 'dictated').length;
-  const rate = sess.log.length > 0 ? Math.round((sugg+spell+voice)/sess.log.length*100) + '%' : '0%';
+  const rateN = entryCounts().assistanceRate;
+  const rate = rateN !== null ? rateN + '%' : '—';
   const date = new Date().toLocaleDateString('en-AU', {day:'2-digit',month:'short',year:'numeric'});
   let out = '=== WORD HELPER SESSION REPORT ===\n';
   out += 'Student: ' + name + '   |   Date: ' + date + '\n';
@@ -5868,52 +6033,68 @@ function downloadGraph() {
   }, 'image/png');
 }
 
+// One CSV cell. Text starting with = + - @ (or a tab / return) gets a leading
+// apostrophe so Excel or Google Sheets shows it as text instead of running it
+// as a formula (a student could type =HYPERLINK(…)). Commas, quotes and line
+// breaks are quoted so they can't shift the columns.
+const csvCell = v => {
+  if (v == null) return '';
+  let s = String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+};
+const csvRow = cells => cells.map(csvCell).join(',') + '\n';
+
 function downloadCSV() {
   const name = document.getElementById('sname').value.trim() || 'Unknown';
 
   const txt = editor.innerText.trim();
   const wc = txt ? txt.split(/\s+/).filter(Boolean).length : 0;
-  const sugg = sess.log.filter(e => e.how === 'suggestion').length;
-  const spell = sess.log.filter(e => e.how === 'corrected').length;
-  const typed = sess.log.filter(e => e.how === 'typed').length;
-  const voice = sess.log.filter(e => e.how === 'dictated').length;
-  const rate = sess.log.length > 0 ? Math.round((sugg+spell+voice)/sess.log.length*100) + '%' : '0%';
+  const c = entryCounts();
   const date = new Date().toLocaleDateString('en-AU', {day:'2-digit',month:'short',year:'numeric'});
-  let csv = 'WORD HELPER — SESSION REPORT\n\n';
-  csv += 'Student,' + name + '\n'; csv += 'Date,' + date + '\n';
-  csv += '\nFINAL WRITING\n'; csv += '"' + txt.replace(/"/g,'""') + '"\n';
-  csv += '\nSESSION STATS\n';
   const wSecsC = getWritingSecs();
   const tSecsC = getTotalSecs();
   const pctC = tSecsC > 0 ? Math.round(wSecsC/tSecsC*100) : 0;
-  csv += 'Total session time,' + Math.floor(tSecsC/60) + 'm ' + String(tSecsC%60).padStart(2,'0') + 's\n';
-  csv += 'Time writing,' + Math.floor(wSecsC/60) + 'm ' + String(wSecsC%60).padStart(2,'0') + 's\n';
-  csv += 'Writing percentage,' + pctC + '%\n';
-  csv += 'Total words written,' + wc + '\n';
-  csv += 'Words from suggestions,' + sugg + '\n';
-  csv += 'From spell corrections,' + spell + '\n';
-  csv += 'From voice dictation,' + voice + '\n';
-  csv += 'Words typed manually,' + typed + '\n';
-  csv += 'Assistance rate,' + rate + '\n';
+  const mmss = secs => Math.floor(secs/60) + 'm ' + String(Math.round(secs%60)).padStart(2,'0') + 's';
   const insC = calcInsightStats();
-  csv += 'Vocab variety (TTR),' + (insC.ttr !== null ? insC.ttr : '') + '\n';
-  csv += 'Words per minute,' + (insC.wpm !== null ? insC.wpm : '') + '\n';
-  csv += 'Connectives used,' + insC.connCount + '\n';
   const listenedWords = [...new Set(sess.events.filter(e=>e.type==='listen' && e.word).map(e=>e.word))];
   const definedWords  = [...new Set(sess.events.filter(e=>e.type==='definition' && e.word).map(e=>e.word))];
-  csv += 'Words listened to,"' + listenedWords.join(' ') + '"\n';
-  csv += 'Definitions heard,"' + definedWords.join(' ') + '"\n';
-  csv += '\nWORD-BY-WORD LOG\n'; csv += '#,Typed,Final word,How entered,Time into session (sec)\n';
+
+  let csv = csvRow(['WORD HELPER — SESSION REPORT']) + '\n';
+  csv += csvRow(['Student', name]);
+  csv += csvRow(['Date', date]);
+  csv += '\n' + csvRow(['FINAL WRITING']);
+  csv += csvRow([txt]);
+  csv += '\n' + csvRow(['SESSION STATS']);
+  csv += csvRow(['Total session time', mmss(tSecsC)]);
+  csv += csvRow(['Time writing', mmss(wSecsC)]);
+  csv += csvRow(['Writing percentage', pctC + '%']);
+  csv += csvRow(['Total words written', wc]);
+  csv += csvRow(['Words from suggestions', c.suggestion]);
+  csv += csvRow(['From spell corrections', c.corrected]);
+  csv += csvRow(['From voice dictation', c.dictated]);
+  csv += csvRow(['Words typed manually', c.typed]);
+  csv += csvRow(['Assistance rate', c.assistanceRate !== null ? c.assistanceRate + '%' : '']);
+  csv += csvRow(['Vocab variety (TTR)', insC.ttr !== null ? insC.ttr : '']);
+  csv += csvRow(['Words per minute', insC.wpm !== null ? insC.wpm : '']);
+  csv += csvRow(['Connectives used', insC.connCount]);
+  csv += csvRow(['Words listened to', listenedWords.join(' ')]);
+  csv += csvRow(['Definitions heard', definedWords.join(' ')]);
+  csv += '\n' + csvRow(['WORD-BY-WORD LOG']);
+  csv += csvRow(['#', 'Typed', 'Final word', 'How entered', 'Time into session (sec)']);
   sess.log.forEach((e,i) => {
     const typed = (e.from && e.from !== e.word) ? e.from : (e.how === 'typed' ? e.word : '');
-    csv += (i+1) + ',"' + typed + '","' + e.word + '",' + e.how + ',' + e.t + '\n';
+    csv += csvRow([i+1, typed, e.word, e.how, e.t]);
   });
-  const blob = new Blob([csv], {type:'text/csv'});
+  // Byte-order mark so Excel opens the dashes and accents correctly.
+  const blob = new Blob(['\uFEFF' + csv], {type:'text/csv;charset=utf-8'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url;
-  a.download = (name.replace(/\s+/g,'-')||'student') + '-word-helper-' + date.replace(/\s/g,'-') + '.csv';
-  a.click(); URL.revokeObjectURL(url);
+  a.download = (name.replace(/[^\w\-]+/g,'-').replace(/^-+|-+$/g,'')||'student') + '-word-helper-' + date.replace(/\s/g,'-') + '.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
 // ── Speech-to-text (dictation) ──
 // Uses the browser's built-in Web Speech API (SpeechRecognition). Chrome/Edge
 // and Safari support it (Chrome/Edge still require the webkit-prefixed
@@ -6091,6 +6272,417 @@ if (micBtn) {
     micBtn.addEventListener('blur', () => { if (dictating) stopDictation(); });
   }
 }
+// ════════════════════════════════════════════════════════════════════════
+// ── SEND TO TEACHER (shared with PagePal) ──
+// Sends the writing and session stats to the teacher's PagePal Inbox: a
+// Google Apps Script web app on the teacher's own Google Sheet
+// (PagePal: teacher/PagePal-Inbox.gs, version 3). Same class QR code, same
+// sheet; the row lands in Submissions with "Word Helper" as the Worksheet.
+//
+// Keep in step with PagePal:
+//   js/send.js   postJson, joinInbox, postToInbox, INBOX_ERRORS
+//   js/links.js  b64urlDecode, isInboxUrl, decodeTeacher, parseLink (teacher part)
+//   js/qr-scan.js  makeDetector, scanQr
+//
+// The connection is stored where PagePal keeps it, localStorage
+// ['pagepal.settings'].teacher = {name, url, secret}. Both apps are on
+// https://evandevon.github.io, so in the same browser (Safari tabs) they
+// share it: connect in either app and both can send. Apps added to the Home
+// Screen each have their own storage, so there it must be done in each.
+//
+// The secret is never in the QR code (only a short-lived join code is), and
+// it is never shown or logged.
+// ════════════════════════════════════════════════════════════════════════
+
+const PAGEPAL_SETTINGS_KEY = 'pagepal.settings';
+const JSQR_URL = 'https://evandevon.github.io/PagePal/lib/jsQR.js'; // PagePal's bundled copy
+
+// ── links.js ──
+function b64urlDecode(str) {
+  const b64 = str.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((str.length + 3) % 4);
+  const bin = atob(b64);
+  return new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
+}
+
+function isInboxUrl(u) {
+  return /^https:\/\/script\.google(usercontent)?\.com\/.+/.test(String(u || ''));
+}
+
+/** A class QR code's ?teacher= value → {name, url, join, expires} or {name, url, secret} (older codes), or null. */
+function decodeTeacher(code) {
+  try {
+    const o = JSON.parse(b64urlDecode(String(code)));
+    if (!o || !isInboxUrl(o.u)) return null;
+    const name = String(o.n || 'my teacher').slice(0, 80);
+    if (o.j) return { name, url: o.u, join: String(o.j), expires: Number(o.x) || 0 };
+    if (o.k) return { name, url: o.u, secret: String(o.k) };
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Text from a QR code or a paste → teacher code, or null. Reads ?teacher= whatever the path. */
+function teacherFromLinkText(text) {
+  let url;
+  try { url = new URL(String(text || '').trim()); } catch (e) { return null; }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+  const code = url.searchParams.get('teacher');
+  return code ? decodeTeacher(code) : null;
+}
+
+// ── Shared connection (PagePal's settings object) ──
+function readPagePalSettings() {
+  try {
+    const o = JSON.parse(localStorage.getItem(PAGEPAL_SETTINGS_KEY));
+    return o && typeof o === 'object' ? o : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function getTeacher() {
+  const t = readPagePalSettings().teacher;
+  if (!t || typeof t !== 'object' || !isInboxUrl(t.url) || !t.secret) return null;
+  return { name: String(t.name || 'my teacher').slice(0, 80), url: t.url, secret: String(t.secret) };
+}
+
+/** Save (or clear, with null) the connection, keeping all of PagePal's other settings. */
+function setTeacher(teacher) {
+  const s = readPagePalSettings();
+  s.teacher = teacher;
+  try {
+    localStorage.setItem(PAGEPAL_SETTINGS_KEY, JSON.stringify(s));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// ── send.js ──
+// Plain-text body (no Content-Type header) makes this a "simple" request,
+// so the browser skips the CORS pre-flight that Apps Script can't answer.
+async function postJson(url, body) {
+  let res;
+  try {
+    res = await fetch(url, { method: 'POST', body: JSON.stringify(body), credentials: 'omit', referrerPolicy: 'no-referrer' });
+  } catch (e) {
+    return { ok: false, error: 'network' };
+  }
+  try {
+    const data = await res.json();
+    return data && typeof data === 'object' ? data : { ok: false, error: 'bad-reply' };
+  } catch (e) {
+    return { ok: false, error: 'bad-reply' };
+  }
+}
+
+function joinInbox(url, join) {
+  return postJson(url, { action: 'join', join });
+}
+
+function postToInbox(teacher, payload) {
+  return postJson(teacher.url, { action: 'submit', secret: teacher.secret, ...payload });
+}
+
+const INBOX_ERRORS = {
+  'wrong-code': 'Your teacher’s class QR code has changed. Scan the new one (Settings › Connect to my teacher).',
+  'expired-join': 'That class QR code has expired. Ask your teacher for a new one.',
+  busy: 'Your teacher’s sheet is very busy right now. Wait a minute and try again.',
+  'too-big': 'This writing is too big to send.',
+  network: 'Couldn’t reach your teacher’s sheet. Check the wifi and try again.',
+  'bad-reply': 'Your teacher’s sheet didn’t answer properly. Tell your teacher.',
+  'bad-request': 'Your teacher’s sheet didn’t understand the message. Tell your teacher.',
+  server: 'Your teacher’s sheet had a problem. Tell your teacher.',
+};
+const inboxError = code => INBOX_ERRORS[code] || 'Couldn’t send. Tell your teacher.';
+
+// ── Showing the connection ──
+function renderTeacher() {
+  const t = getTeacher();
+  const status = document.getElementById('teacher-status');
+  const connectBtn = document.getElementById('connect-teacher-btn');
+  const disconnectBtn = document.getElementById('disconnect-teacher-btn');
+  const sendBtn = document.getElementById('send-teacher-btn');
+  status.textContent = t ? 'Sending work to ' + t.name : 'Not connected';
+  connectBtn.innerHTML = t ? '&#128247; Scan a new class QR code' : '&#128247; Connect to my teacher';
+  disconnectBtn.hidden = !t;
+  sendBtn.hidden = !t;
+  if (t) sendBtn.textContent = '📤 Send to ' + t.name;
+}
+// PagePal connecting or disconnecting in another tab updates this one.
+window.addEventListener('storage', e => { if (e.key === PAGEPAL_SETTINGS_KEY || e.key === null) renderTeacher(); });
+
+// ── Connecting ──
+let teacherBusy = false;
+
+async function connectTeacher(code) {
+  if (code.join && code.expires && Date.now() > code.expires) {
+    showToast('That class QR code has expired. Ask your teacher for a new one.');
+    return false;
+  }
+  if (!confirm('Send your work to ' + code.name + '?\n\nOnly say yes to a QR code your teacher gave you.')) return false;
+  let saved;
+  if (code.join) {
+    teacherBusy = true;
+    showToast('Connecting to your teacher…');
+    const result = await joinInbox(code.url, code.join);
+    teacherBusy = false;
+    if (!result.ok || !result.key) {
+      showToast(result.ok ? INBOX_ERRORS['bad-reply'] : inboxError(result.error));
+      return false;
+    }
+    saved = { name: code.name, url: code.url, secret: String(result.key) };
+  } else {
+    saved = { name: code.name, url: code.url, secret: code.secret }; // older code: no join step
+  }
+  if (!setTeacher(saved)) { showToast('Couldn’t save the connection on this device.'); return false; }
+  renderTeacher();
+  showToast('Connected. Your work will go to ' + saved.name + '.');
+  return true;
+}
+
+/** QR text or a pasted link. */
+function handleTeacherLinkText(text) {
+  const code = teacherFromLinkText(text);
+  if (!code) {
+    showToast('That isn’t a class QR code. Ask your teacher for the class QR code.');
+    return Promise.resolve(false);
+  }
+  return connectTeacher(code);
+}
+
+function disconnectTeacher() {
+  if (!confirm('Stop sending work to this teacher?\n\nThis also disconnects PagePal in this browser.')) return;
+  setTeacher(null);
+  renderTeacher();
+}
+
+// ── qr-scan.js ──
+let jsQRPromise = null;
+function loadJsQR() {
+  if (window.jsQR) return Promise.resolve(window.jsQR);
+  if (!jsQRPromise) {
+    jsQRPromise = new Promise((resolve, reject) => {
+      const sc = document.createElement('script');
+      sc.src = JSQR_URL;
+      sc.onload = () => (window.jsQR ? resolve(window.jsQR) : reject(new Error('QR reader missing')));
+      sc.onerror = () => { jsQRPromise = null; reject(new Error('Could not load the QR reader')); };
+      document.head.appendChild(sc);
+    });
+  }
+  return jsQRPromise;
+}
+
+async function makeQrDetector() {
+  if ('BarcodeDetector' in window) {
+    try {
+      const formats = await window.BarcodeDetector.getSupportedFormats();
+      if (formats.includes('qr_code')) {
+        const bd = new window.BarcodeDetector({ formats: ['qr_code'] });
+        return async source => {
+          const codes = await bd.detect(source);
+          return codes.length ? codes[0].rawValue : null;
+        };
+      }
+    } catch (e) { /* fall back to jsQR */ }
+  }
+  const jsQR = await loadJsQR();
+  return async canvas => {
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const code = jsQR(data, width, height, { inversionAttempts: 'attemptBoth' });
+    return code ? code.data : null;
+  };
+}
+
+function imageFileToCanvas(file, maxSide) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.naturalWidth * scale);
+      c.height = Math.round(img.naturalHeight * scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      resolve(c);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read the photo')); };
+    img.src = url;
+  });
+}
+
+/** Camera scanner (with photo and paste fallbacks). Resolves with the text found, or null if cancelled. */
+function scanQr() {
+  return new Promise(resolve => {
+    const screen = document.getElementById('scanner');
+    const video = document.getElementById('scanner-video');
+    const msg = document.getElementById('scanner-msg');
+    const cancelBtn = document.getElementById('scanner-cancel');
+    const photo = document.getElementById('scanner-photo');
+    const pasteForm = document.getElementById('scanner-paste');
+    const linkInput = document.getElementById('scanner-link');
+    const work = document.createElement('canvas');
+    let stream = null, running = true, timer = null;
+
+    const stop = result => {
+      if (!running) return;
+      running = false;
+      clearTimeout(timer);
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      video.srcObject = null;
+      screen.hidden = true;
+      cancelBtn.removeEventListener('click', onCancel);
+      photo.removeEventListener('change', onPhoto);
+      pasteForm.removeEventListener('submit', onPaste);
+      document.removeEventListener('keydown', onKey);
+      resolve(result);
+    };
+    const onCancel = () => stop(null);
+    const onKey = e => { if (e.key === 'Escape') stop(null); };
+    const onPaste = e => {
+      e.preventDefault();
+      const text = linkInput.value.trim();
+      if (text) stop(text);
+    };
+    const onPhoto = async e => {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      msg.textContent = 'Reading the photo…';
+      let text = null;
+      try {
+        const detect = await makeQrDetector();
+        text = await detect(await imageFileToCanvas(file, 1600));
+      } catch (err) { text = null; }
+      if (text) stop(text);
+      else msg.textContent = 'No QR code found in that photo. Try again, closer and in focus.';
+    };
+
+    cancelBtn.addEventListener('click', onCancel);
+    photo.addEventListener('change', onPhoto);
+    pasteForm.addEventListener('submit', onPaste);
+    document.addEventListener('keydown', onKey);
+    linkInput.value = '';
+    msg.textContent = 'Point the camera at your class QR code.';
+    screen.hidden = false;
+
+    (async () => {
+      let detect;
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('no camera');
+        detect = await makeQrDetector();
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        });
+      } catch (err) {
+        if (!running) return;
+        msg.textContent = err && err.name === 'NotAllowedError'
+          ? 'The camera is blocked. Allow it in Settings › Safari › Camera, or use “Choose a photo” or paste the link.'
+          : 'The camera isn’t available. Use “Choose a photo” of the QR code, or paste the class link.';
+        return;
+      }
+      if (!running) { stream.getTracks().forEach(t => t.stop()); return; }
+      video.srcObject = stream;
+      video.setAttribute('playsinline', '');
+      await video.play().catch(() => {});
+
+      const tick = async () => {
+        if (!running) return;
+        if (video.readyState >= 2 && video.videoWidth) {
+          // Look at the middle of the picture, scaled down: faster, and it's where the frame is.
+          const side = Math.min(video.videoWidth, video.videoHeight);
+          const size = Math.min(720, side);
+          work.width = work.height = size;
+          work.getContext('2d', { willReadFrequently: true }).drawImage(
+            video, (video.videoWidth - side) / 2, (video.videoHeight - side) / 2, side, side, 0, 0, size, size);
+          const text = await detect(work).catch(() => null);
+          if (text && running) {
+            if (navigator.vibrate) navigator.vibrate(60);
+            stop(text);
+            return;
+          }
+        }
+        timer = setTimeout(tick, 120);
+      };
+      tick();
+    })();
+  });
+}
+
+async function openTeacherScanner() {
+  if (teacherBusy) return;
+  const text = await scanQr();
+  if (text) await handleTeacherLinkText(text);
+}
+
+// ── Sending ──
+function teacherStats(answer) {
+  const c = entryCounts();
+  const listens = sess.events.filter(e => e.type === 'listen');
+  const totalSecs = Math.round(getTotalSecs());
+  return {
+    totalSecs,
+    workingSecs: Math.min(Math.round(getWritingSecs()), totalSecs), // rounding can't make it exceed the total
+    wordsWritten: answer ? answer.split(/\s+/).filter(Boolean).length : 0,
+    typed: c.typed,
+    dictated: c.dictated,
+    suggestion: c.suggestion,
+    corrected: c.corrected,
+    assistanceRate: c.assistanceRate,
+    listens: listens.length,
+    wordsListened: [...new Set(listens.filter(e => e.word).map(e => String(e.word).toLowerCase()))],
+  };
+}
+
+async function sendToTeacher() {
+  const teacher = getTeacher();
+  if (!teacher) { renderTeacher(); showToast('Connect to your teacher first: Settings › Connect to my teacher.'); return false; }
+  if (teacherBusy) return false;
+  const nameEl = document.getElementById('sname');
+  const student = nameEl.value.trim().slice(0, 80);
+  if (!student) { showToast('Type your name first, so your teacher knows it’s yours.'); nameEl.focus(); return false; }
+  const answer = editor.innerText.trim();
+  if (!answer) { showToast('Nothing to send yet!'); return false; }
+  if (answer.length > 40000) { showToast(INBOX_ERRORS['too-big']); return false; }
+
+  const btn = document.getElementById('send-teacher-btn');
+  const label = btn.textContent;
+  teacherBusy = true; btn.disabled = true; btn.textContent = '⏳ Sending…';
+  const result = await postToInbox(teacher, {
+    student,
+    worksheet: 'Word Helper',
+    className: teacher.name,
+    sentAt: new Date().toISOString(),
+    answer,
+    stats: teacherStats(answer),
+  });
+  teacherBusy = false; btn.disabled = false; btn.textContent = label;
+  if (result.ok) {
+    showToast('Sent to ' + teacher.name + ' ✓');
+    return true;
+  }
+  showToast(inboxError(result.error));
+  return false;
+}
+
+// Show the saved connection, then handle a class link opened straight in
+// Word Helper (…/Word_Helper/?teacher=CODE), taking it out of the address.
+renderTeacher();
+document.getElementById('online-lookups').checked = onlineLookups;
+(function connectFromAddress() {
+  const params = new URLSearchParams(location.search);
+  if (!params.has('teacher')) return;
+  const href = location.href;
+  params.delete('teacher');
+  const qs = params.toString();
+  try { history.replaceState(null, '', location.pathname + (qs ? '?' + qs : '') + location.hash); } catch (e) { /* ignore */ }
+  setTimeout(() => handleTeacherLinkText(href), 300);
+})();
+// ── END SEND TO TEACHER ──
 </script>
 </body>
 </html>
