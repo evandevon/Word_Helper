@@ -848,6 +848,10 @@ function isLikelyMisspelled(word) {
 
 function runSpellPass(skipSchedule) {
   if (!assistOn() || !editor.isContentEditable) return;
+  // Redrawing the writing while the corrections menu is open would throw away
+  // the word the menu points at, so tapping a correction did nothing. hideDD()
+  // schedules a fresh pass as soon as the menu closes.
+  if (dropMode === 'spell' && dropdown.style.display === 'block') return;
   // Don't rewrite innerHTML while read-aloud is highlighting words
   if (document.getElementById('current-word-highlight')) return;
 
@@ -5069,6 +5073,14 @@ function speakDefinition(word, def, btn) {
 
 function showSpellDD(wordInfo) {
   const { word } = wordInfo;
+  // Note the word's position in the text now, so a correction can still find
+  // it even if the underline <span> is replaced before the student taps.
+  if (wordInfo.span && wordInfo.span.parentNode && wordInfo.textStart === undefined) {
+    const r = document.createRange();
+    r.setStart(editor, 0); r.setEnd(wordInfo.span, 0);
+    wordInfo.textStart = r.toString().length;
+    wordInfo.textEnd = wordInfo.textStart + wordInfo.span.textContent.length;
+  }
   dropMode = 'spell'; // set immediately so fetchSugg won't override
   spellDDActive = true;
   activeIdx = -1;
@@ -5225,7 +5237,7 @@ function replaceWord(wordInfo, replacement) {
       const searchFrom = Math.max(0, ts - 20);
       const searchIn = fullText.slice(searchFrom, te + 20).toLowerCase();
       const idx = searchIn.indexOf(wordInfo.word.toLowerCase());
-      if (idx < 0) return;
+      if (idx < 0) { debugLog('replaceWord: word not found, closing menu'); hideDD('replace-failed'); return; }
       wordInfo.textStart = searchFrom + idx;
       wordInfo.textEnd = wordInfo.textStart + wordInfo.word.length;
     }
@@ -5250,6 +5262,8 @@ function replaceWord(wordInfo, replacement) {
     restoreCaretOffset(editor, caretPos);
 
   } else {
+    debugLog('replaceWord: no position for word, closing menu');
+    hideDD('replace-failed');
     return;
   }
   logWord(replacement, 'corrected', wordInfo.word || null);
@@ -5370,12 +5384,19 @@ function setActive(i) { dropdown.querySelectorAll('.drop-item').forEach((el,j) =
 
 function insertWord(word, how) {
   editor.focus();
-  const sel = getSelection(); if (!sel.rangeCount) return;
+  const sel = getSelection(); if (!sel.rangeCount) { hideDD('insert-failed'); return; }
+  // A spell re-check may have redrawn the writing, leaving the caret between
+  // elements rather than inside the text; put it back inside the text first.
+  if (sel.getRangeAt(0).startContainer.nodeType !== Node.TEXT_NODE) {
+    const r = sel.getRangeAt(0).cloneRange(); r.setStart(editor, 0);
+    restoreCaretOffset(editor, r.toString().length);
+  }
   const range = sel.getRangeAt(0);
   const before = getBeforeCaret();
-  const m = before.match(/[\w'']+$/); if (!m) return;
+  const m = before.match(/[\w'']+$/); if (!m) { hideDD('insert-failed'); return; }
   const node = range.startContainer, off = range.startOffset;
-  if (node.nodeType === Node.TEXT_NODE) {
+  if (node.nodeType !== Node.TEXT_NODE) { hideDD('insert-failed'); return; }
+  {
     const start = Math.max(0, off - m[0].length);
     const nr = document.createRange(); nr.setStart(node, start); nr.setEnd(node, off); nr.deleteContents();
     const tn = document.createTextNode(word + ' '); nr.insertNode(tn);
@@ -6256,8 +6277,18 @@ if (micBtn) {
     micBtn.classList.add('unsupported');
     micBtn.title = 'Speech-to-text isn’t supported in this browser';
   } else {
-    const start = (e) => { e.preventDefault(); startDictation(); };
-    const stop = (e) => { if (e) e.preventDefault(); stopDictation(); };
+    // The release is listened for on the whole page (the finger may slide off
+    // the button), so only act on it while the mic button is actually held.
+    // Cancelling every touchend on the page used to swallow ordinary taps on
+    // phones and iPads: fields wouldn't focus and buttons wouldn't respond.
+    let micHeld = false;
+    const start = (e) => { e.preventDefault(); micHeld = true; startDictation(); };
+    const stop = (e) => {
+      if (!micHeld) return;
+      micHeld = false;
+      if (e && e.cancelable) e.preventDefault();
+      stopDictation();
+    };
     micBtn.addEventListener('mousedown', start);
     micBtn.addEventListener('touchstart', start, { passive: false });
     document.addEventListener('mouseup', stop);
