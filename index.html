@@ -6412,8 +6412,26 @@ function joinInbox(url, join) {
   return postJson(url, { action: 'join', join });
 }
 
+// tool: 'word-helper' makes the PagePal Inbox script (version 4+) file this in
+// its separate "Word Helper submissions" spreadsheet, not the PagePal sheet.
 function postToInbox(teacher, payload) {
-  return postJson(teacher.url, { action: 'submit', secret: teacher.secret, ...payload });
+  return postJson(teacher.url, { action: 'submit', tool: 'word-helper', secret: teacher.secret, ...payload });
+}
+
+// Older inbox scripts would put Word Helper work in the PagePal sheet, so check
+// first. Resolves 'ok', 'old' (script needs updating) or 'network'.
+const inboxChecked = {};
+async function inboxTakesWordHelper(url) {
+  if (inboxChecked[url] === 'ok') return 'ok';
+  try {
+    const res = await fetch(url, { credentials: 'omit', referrerPolicy: 'no-referrer' });
+    const info = await res.json();
+    const ok = info && info.app === 'PagePal Inbox' && Array.isArray(info.tools) && info.tools.includes('word-helper');
+    if (ok) inboxChecked[url] = 'ok';
+    return ok ? 'ok' : 'old';
+  } catch (e) {
+    return 'network';
+  }
 }
 
 const INBOX_ERRORS = {
@@ -6424,6 +6442,7 @@ const INBOX_ERRORS = {
   network: 'Couldn’t reach your teacher’s sheet. Check the wifi and try again.',
   'bad-reply': 'Your teacher’s sheet didn’t answer properly. Tell your teacher.',
   'bad-request': 'Your teacher’s sheet didn’t understand the message. Tell your teacher.',
+  'old-inbox': 'Your teacher needs to update their PagePal Inbox script before Word Helper can send work. Tell your teacher.',
   server: 'Your teacher’s sheet had a problem. Tell your teacher.',
 };
 const inboxError = code => INBOX_ERRORS[code] || 'Couldn’t send. Tell your teacher.';
@@ -6666,6 +6685,7 @@ function teacherStats(answer) {
     assistanceRate: c.assistanceRate,
     listens: listens.length,
     wordsListened: [...new Set(listens.filter(e => e.word).map(e => String(e.word).toLowerCase()))],
+    wordsDefined: [...new Set(sess.events.filter(e => e.type === 'definition' && e.word).map(e => String(e.word).toLowerCase()))],
   };
 }
 
@@ -6683,9 +6703,14 @@ async function sendToTeacher() {
   const btn = document.getElementById('send-teacher-btn');
   const label = btn.textContent;
   teacherBusy = true; btn.disabled = true; btn.textContent = '⏳ Sending…';
+  const check = await inboxTakesWordHelper(teacher.url);
+  if (check !== 'ok') {
+    teacherBusy = false; btn.disabled = false; btn.textContent = label;
+    showToast(inboxError(check === 'old' ? 'old-inbox' : 'network'));
+    return false;
+  }
   const result = await postToInbox(teacher, {
     student,
-    worksheet: 'Word Helper',
     className: teacher.name,
     sentAt: new Date().toISOString(),
     answer,
