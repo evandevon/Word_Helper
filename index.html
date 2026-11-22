@@ -259,6 +259,7 @@ label.set-row{flex-wrap:nowrap;cursor:pointer}
           <strong>Send to teacher</strong>
           <div id="teacher-status">Not connected</div>
           <small>Uses the same class QR code as PagePal.</small>
+          <small><a href="https://evandevon.github.io/classroom_inbox/" target="_blank" rel="noopener">For teachers: set up Classroom Inbox and make class QR codes</a></small>
         </div>
         <button class="btn btn-green" id="connect-teacher-btn" type="button" onclick="openTeacherScanner()">&#128247; Connect to my teacher</button>
         <button class="btn btn-red" id="disconnect-teacher-btn" type="button" onclick="disconnectTeacher()" hidden>Disconnect</button>
@@ -6367,10 +6368,14 @@ if (micBtn) {
 }
 // ════════════════════════════════════════════════════════════════════════
 // ── SEND TO TEACHER (shared with PagePal) ──
-// Sends the writing and session stats to the teacher's PagePal Inbox: a
-// Google Apps Script web app on the teacher's own Google Sheet
-// (PagePal: teacher/PagePal-Inbox.gs, version 3). Same class QR code, same
-// sheet; the row lands in Submissions with "Word Helper" as the Worksheet.
+// Sends the writing and session stats to the teacher's Classroom Inbox: a
+// Google Apps Script web app in the teacher's own Google Drive
+// (https://github.com/evandevon/classroom_inbox, apps-script/Classroom-Inbox.gs,
+// version 5+). It files tool: 'word-helper' work in its own "Word Helper
+// submissions" spreadsheet, in Drive › Classroom Inbox › Word Helper
+// submissions, with any PDFs in › Class. Same class QR code as PagePal.
+// Teachers set it up and make class QR codes at
+// https://evandevon.github.io/classroom_inbox/.
 //
 // Keep in step with PagePal:
 //   js/send.js   postJson, joinInbox, postToInbox, INBOX_ERRORS
@@ -6474,14 +6479,16 @@ function joinInbox(url, join) {
   return postJson(url, { action: 'join', join });
 }
 
-// tool: 'word-helper' makes the PagePal Inbox script (version 4+) file this in
-// its separate "Word Helper submissions" spreadsheet, not the PagePal sheet.
+// tool: 'word-helper' makes the inbox script (PagePal Inbox v4+, Classroom
+// Inbox v5+) file this in its "Word Helper submissions" spreadsheet, not
+// PagePal's.
 function postToInbox(teacher, payload) {
   return postJson(teacher.url, { action: 'submit', tool: 'word-helper', secret: teacher.secret, ...payload });
 }
 
 // Older inbox scripts would put Word Helper work in the PagePal sheet, so check
-// first. Resolves 'ok', 'old' (script needs updating) or 'network'.
+// first. Classroom Inbox still answers GET with app: 'PagePal Inbox' and lists
+// 'word-helper' in tools. Resolves 'ok', 'old' (script needs updating) or 'network'.
 const inboxChecked = {};
 async function inboxTakesWordHelper(url) {
   if (inboxChecked[url] === 'ok') return 'ok';
@@ -6499,13 +6506,13 @@ async function inboxTakesWordHelper(url) {
 const INBOX_ERRORS = {
   'wrong-code': 'Your teacher’s class QR code has changed. Scan the new one (Settings › Connect to my teacher).',
   'expired-join': 'That class QR code has expired. Ask your teacher for a new one.',
-  busy: 'Your teacher’s sheet is very busy right now. Wait a minute and try again.',
+  busy: 'Your teacher’s inbox is very busy right now. Wait a minute and try again.',
   'too-big': 'This writing is too big to send.',
-  network: 'Couldn’t reach your teacher’s sheet. Check the wifi and try again.',
-  'bad-reply': 'Your teacher’s sheet didn’t answer properly. Tell your teacher.',
-  'bad-request': 'Your teacher’s sheet didn’t understand the message. Tell your teacher.',
-  'old-inbox': 'Your teacher needs to update their PagePal Inbox script before Word Helper can send work. Tell your teacher.',
-  server: 'Your teacher’s sheet had a problem. Tell your teacher.',
+  network: 'Couldn’t reach your teacher’s inbox. Check the wifi and try again.',
+  'bad-reply': 'Your teacher’s inbox didn’t answer properly. Tell your teacher.',
+  'bad-request': 'Your teacher’s inbox didn’t understand the message. Tell your teacher.',
+  'old-inbox': 'Your teacher needs to update their Classroom Inbox script before Word Helper can send work. Tell your teacher.',
+  server: 'Your teacher’s inbox had a problem. Tell your teacher.',
 };
 const inboxError = code => INBOX_ERRORS[code] || 'Couldn’t send. Tell your teacher.';
 
